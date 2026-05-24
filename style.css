@@ -1,0 +1,312 @@
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #22263a;
+  --gold: #c8a951;
+  --gold-light: #e8c96a;
+  --text: #e8e8e8;
+  --text-muted: #8a8a9a;
+  --border: #2a2d3f;
+  --complete-bg: #132013;
+  --complete-border: #2d6b2d;
+  --complete-text: #6dba6d;
+  --claimed-bg: #231d0c;
+  --claimed-border: #7a5c10;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.hidden { display: none !important; }
+
+/* ── Name Screen ── */
+#name-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at center, #1a1d2e 0%, #0f1117 70%);
+}
+
+.name-card {
+  background: var(--surface);
+  border: 1px solid var(--gold);
+  border-radius: 14px;
+  padding: 48px 40px;
+  text-align: center;
+  width: 100%;
+  max-width: 380px;
+}
+
+.logo { font-size: 48px; margin-bottom: 12px; }
+
+.name-card h1 {
+  font-size: 28px;
+  color: var(--gold);
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.name-card p {
+  color: var(--text-muted);
+  margin-bottom: 24px;
+  font-size: 15px;
+}
+
+#name-input {
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 16px;
+  margin-bottom: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#name-input:focus { border-color: var(--gold); }
+
+#name-btn {
+  width: 100%;
+  padding: 13px;
+  background: var(--gold);
+  color: #0f1117;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+#name-btn:hover { background: var(--gold-light); }
+
+/* ── Header ── */
+header {
+  background: var(--surface);
+  border-bottom: 2px solid var(--gold);
+  padding: 12px 28px;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+header h1 {
+  color: var(--gold);
+  font-size: 22px;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.stats-bar {
+  display: flex;
+  gap: 28px;
+  flex: 1;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.playing-as { font-size: 14px; color: var(--text-muted); }
+.playing-as strong { color: var(--gold); }
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.btn-ghost:hover { border-color: var(--gold); color: var(--gold); }
+
+.refresh-info {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* ── Main ── */
+main {
+  padding: 28px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* ── Tile Groups ── */
+.tile-group { margin-bottom: 44px; }
+
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  font-size: 17px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.pts-badge {
+  display: inline-block;
+  padding: 3px 11px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pts-5 { background: #c0392b; color: #fff; }
+.pts-4 { background: #c0672b; color: #fff; }
+.pts-3 { background: #b8961a; color: #0f1117; }
+.pts-2 { background: #2980b9; color: #fff; }
+.pts-1 { background: #555570; color: #fff; }
+
+/* ── Tile Grid ── */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 12px;
+}
+
+/* ── Tile Cards ── */
+.tile-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.2s;
+}
+
+.tile-card:hover:not(.complete) { border-color: #4a4d60; }
+
+.tile-card.complete {
+  background: var(--complete-bg);
+  border-color: var(--complete-border);
+  opacity: 0.7;
+}
+
+.tile-card.claimed {
+  background: var(--claimed-bg);
+  border-color: var(--claimed-border);
+}
+
+.tile-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.tile-task {
+  font-size: 14px;
+  line-height: 1.45;
+  flex: 1;
+}
+
+.status-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.status-badge.done    { background: #1a4a1a; color: var(--complete-text); }
+.status-badge.active  { background: #3d2c08; color: #e8b840; }
+.status-badge.open    { background: #1e2032; color: var(--text-muted); }
+
+.progress-info {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ── Claimants ── */
+.claimants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.claimant {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.claimant.me {
+  background: #162616;
+  border-color: #3a6a3a;
+  color: var(--complete-text);
+  font-weight: 600;
+}
+
+/* ── Buttons ── */
+.btn-claim, .btn-unclaim {
+  padding: 7px 16px;
+  border-radius: 7px;
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  align-self: flex-start;
+}
+
+.btn-claim { background: var(--gold); color: #0f1117; }
+.btn-claim:hover { background: var(--gold-light); }
+
+.btn-unclaim { background: #3a1f1f; color: #e07070; border: 1px solid #5a2f2f; }
+.btn-unclaim:hover { background: #4a2020; }
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  header { padding: 10px 16px; gap: 16px; }
+  .stats-bar { gap: 18px; }
+  main { padding: 16px; }
+  .tile-grid { grid-template-columns: 1fr; }
+  .header-right { width: 100%; justify-content: flex-end; }
+}
