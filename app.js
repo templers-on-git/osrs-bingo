@@ -27,6 +27,7 @@ let currentUser = null;
 let tiles = [];
 let claims = {};
 let prevComplete = {}; // tracks complete state between polls for auto-wipe
+let hideCompleted = false;
 
 // ── Name Screen ───────────────────────────────────────────────────────────────
 
@@ -57,6 +58,12 @@ document.getElementById("name-btn").addEventListener("click", () => {
 
 document.getElementById("name-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") document.getElementById("name-btn").click();
+});
+
+document.getElementById("toggle-completed-btn").addEventListener("click", () => {
+  hideCompleted = !hideCompleted;
+  document.getElementById("toggle-completed-btn").textContent = hideCompleted ? "Show Completed" : "Hide Completed";
+  renderTiles();
 });
 
 document.getElementById("change-name-btn").addEventListener("click", () => {
@@ -196,7 +203,7 @@ function renderTiles() {
   const GROUP_LABELS = { 5: "High Value", 4: "Hard", 3: "Medium", 2: "Easy", 1: "Beginner" };
 
   [5, 4, 3, 2, 1].forEach((pts) => {
-    const group = tiles.filter((t) => t.points === pts);
+    const group = tiles.filter((t) => t.points === pts && !(hideCompleted && t.complete));
     if (!group.length) return;
 
     const section = document.createElement("section");
