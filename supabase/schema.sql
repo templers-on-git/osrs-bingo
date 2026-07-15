@@ -263,32 +263,33 @@ begin
 end;
 $$;
 
--- Login lookup: only one event is ever "published" (live) at a time, so a
--- password only needs to be checked against that event's clans. Returns zero
--- rows if nothing matches. Only ever called from the login Edge Function
--- using the service role key — never exposed to anon/authenticated clients
--- directly (revoked below), since it's a brute-forceable password check.
+-- Login lookup. Admins can get into a clan's event while it's still 'draft'
+-- (to build the board, check clan names, etc. before anyone else sees it)
+-- or once it's 'published'; Players only once it's 'published'. No longer
+-- assumes a single global "the live event" — checks each clan's own
+-- event's status directly, so multiple draft events can coexist (e.g. Dev
+-- building several at once) without this needing to pick just one. Returns
+-- zero rows if nothing matches. Only ever called from the login Edge
+-- Function using the service role key — never exposed to anon/authenticated
+-- clients directly (revoked below), since it's a brute-forceable password check.
 create or replace function login_with_password(p_password text)
 returns table (clan_id uuid, event_id uuid, role text)
 language plpgsql
 security definer
 as $$
-declare
-  v_event_id uuid;
 begin
-  select id into v_event_id from events where status = 'published' order by created_at desc limit 1;
-  if v_event_id is null then
-    return;
-  end if;
-
   return query
     select c.id, c.event_id, 'admin'::text
     from clans c
-    where c.event_id = v_event_id and c.admin_password_hash = crypt(p_password, c.admin_password_hash)
+    join events e on e.id = c.event_id
+    where e.status in ('draft', 'published')
+      and c.admin_password_hash = crypt(p_password, c.admin_password_hash)
   union all
     select c.id, c.event_id, 'player'::text
     from clans c
-    where c.event_id = v_event_id and c.player_password_hash = crypt(p_password, c.player_password_hash);
+    join events e on e.id = c.event_id
+    where e.status = 'published'
+      and c.player_password_hash = crypt(p_password, c.player_password_hash);
 end;
 $$;
 

@@ -5,6 +5,7 @@ import {
   listEvents,
   deleteEvent,
   setEventStatus,
+  updateEventEndTime,
   createClan,
   assignClanToEvent,
   listClans,
@@ -85,6 +86,15 @@ async function loadDashboard() {
   renderDashboard();
 }
 
+// datetime-local inputs need "YYYY-MM-DDTHH:mm" in the browser's local time
+// (no timezone) — the reverse of new Date(inputValue).toISOString(), which
+// the create-event form already uses to go the other direction.
+function toDatetimeLocalValue(isoString) {
+  const d = new Date(isoString);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // Shared row markup for a clan, used both in the unassigned list and inside
 // each event card — showRemove only makes sense for clans already on an event.
 function clanRowHtml(c, { showRemove }) {
@@ -127,7 +137,11 @@ function renderDashboard() {
           ${publishToggle}
           <button class="btn-ghost" data-delete-event="${event.id}">Delete event</button>
         </h3>
-        <p class="dev-muted">Ends: ${new Date(event.end_time_utc).toLocaleString()}</p>
+        <p class="dev-muted">
+          Ends: ${new Date(event.end_time_utc).toLocaleString()}
+          <input type="datetime-local" data-end-input="${event.id}" value="${toDatetimeLocalValue(event.end_time_utc)}">
+          <button class="btn-ghost" data-save-end="${event.id}">Save end time</button>
+        </p>
         <ul class="dev-list">
           ${assigned.length
             ? assigned.map((c) => clanRowHtml(c, { showRemove: true })).join("")
@@ -248,6 +262,16 @@ eventsList.addEventListener("click", async (e) => {
   if (unpublishEventId) {
     await setEventStatus(supabase, unpublishEventId, "draft");
     await loadDashboard();
+    return;
+  }
+
+  const saveEndEventId = e.target.dataset.saveEnd;
+  if (saveEndEventId) {
+    const input = eventsList.querySelector(`input[data-end-input="${saveEndEventId}"]`);
+    if (input?.value) {
+      await updateEventEndTime(supabase, saveEndEventId, new Date(input.value).toISOString());
+      await loadDashboard();
+    }
     return;
   }
 

@@ -4,6 +4,7 @@ import {
   listEvents,
   deleteEvent,
   setEventStatus,
+  updateEventEndTime,
   createClan,
   assignClanToEvent,
   listClans,
@@ -148,6 +149,21 @@ describe("setEventStatus", () => {
 
     expect(from).toHaveBeenCalledWith("events");
     expect(update).toHaveBeenCalledWith({ status: "published" });
+    expect(eq).toHaveBeenCalledWith("id", "event-1");
+  });
+});
+
+describe("updateEventEndTime", () => {
+  it("updates the event's end_time_utc", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateEventEndTime(fakeSupabase, "event-1", "2026-09-01T00:00:00Z");
+
+    expect(from).toHaveBeenCalledWith("events");
+    expect(update).toHaveBeenCalledWith({ end_time_utc: "2026-09-01T00:00:00Z" });
     expect(eq).toHaveBeenCalledWith("id", "event-1");
   });
 });
