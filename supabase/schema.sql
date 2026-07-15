@@ -1,5 +1,12 @@
 -- osrs-bingo v2 schema draft — review before running in the Supabase SQL Editor.
 -- Matches the entities in ADMIN_SPEC.md. RLS policies are added separately, after this.
+--
+-- NOTE: create_clan/assign_clan_to_event/list_dev_clans below call
+-- current_is_dev(), which is defined in rls.sql, not here. Postgres allows
+-- this forward reference at CREATE FUNCTION time (resolved at call time,
+-- not creation time), but it means a truly from-scratch setup (e.g. right
+-- after reset.sql) must run this file AND rls.sql before any of those three
+-- functions are actually called, even though rls.sql "runs after" this file.
 
 create extension if not exists pgcrypto;
 
@@ -11,16 +18,26 @@ create table if not exists events (
   created_at timestamptz not null default now()
 );
 
+-- event_id is nullable: a clan is created on its own (Dev-only) and then
+-- assigned to exactly one event afterward via assign_clan_to_event(). It's
+-- still only ever in one event at a time, just not atomically with creation.
 create table if not exists clans (
   id uuid primary key default gen_random_uuid(),
-  event_id uuid not null references events(id) on delete cascade,
+  event_id uuid references events(id) on delete cascade,
   display_name text not null,
+  prefix text,
   admin_password_hash text not null,
   player_password_hash text not null,
   is_shadow boolean not null default false, -- true = manually-tracked clan not using the app
   shadow_score int, -- only used when is_shadow = true
   created_at timestamptz not null default now()
 );
+
+-- `create table if not exists` above won't retroactively alter an
+-- already-existing clans table (e.g. the live project's, from before
+-- clans were decoupled from events) — these do that part, idempotently.
+alter table clans alter column event_id drop not null;
+alter table clans add column if not exists prefix text;
 
 -- one row per clan once their admin presses "Finish Early"; event ends when
 -- every clan in the event has a row here
@@ -103,9 +120,20 @@ begin
 end;
 $$;
 
--- Creates a clan with freshly generated admin/player passwords and returns the
--- plaintext values once — this is the only time they're ever visible again.
-create or replace function create_clan(p_event_id uuid, p_display_name text)
+-- Old signature from when clans were created atomically with an event
+-- assignment — superseded by create_clan(text, text) below, which has no
+-- event_id and (unlike this one) actually checks current_is_dev(). Dropped
+-- explicitly since `create or replace` can't change a function's parameter
+-- list — it would otherwise leave this unguarded version still callable.
+drop function if exists create_clan(uuid, text);
+
+-- Creates a clan (not yet assigned to any event — see assign_clan_to_event)
+-- with freshly generated admin/player passwords and returns the plaintext
+-- values once — this is the only time they're ever visible again. Dev-only:
+-- security definer functions bypass RLS entirely, and Supabase grants
+-- execute on new functions to anon/authenticated by default, so the check
+-- has to happen explicitly in the function body.
+create or replace function create_clan(p_display_name text, p_prefix text default null)
 returns table (clan_id uuid, admin_password text, player_password text)
 language plpgsql
 security definer
@@ -115,12 +143,47 @@ declare
   v_player_password text := generate_clan_password();
   v_clan_id uuid;
 begin
-  insert into clans (event_id, display_name, admin_password_hash, player_password_hash)
-  values (p_event_id, p_display_name, crypt(v_admin_password, gen_salt('bf')), crypt(v_player_password, gen_salt('bf')))
+  if not current_is_dev() then
+    raise exception 'dev only';
+  end if;
+
+  insert into clans (display_name, prefix, admin_password_hash, player_password_hash)
+  values (p_display_name, p_prefix, crypt(v_admin_password, gen_salt('bf')), crypt(v_player_password, gen_salt('bf')))
   returning id into v_clan_id;
 
   return query select v_clan_id, v_admin_password, v_player_password;
 end;
+$$;
+
+-- Assigns (or, with p_event_id = null, unassigns) a clan to/from an event.
+-- Dev-only, same reasoning as create_clan above.
+create or replace function assign_clan_to_event(p_clan_id uuid, p_event_id uuid)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  if not current_is_dev() then
+    raise exception 'dev only';
+  end if;
+
+  update clans set event_id = p_event_id where id = p_clan_id;
+end;
+$$;
+
+-- Dev-only listing of every clan regardless of event assignment (unlike
+-- list_clans below, which is scoped to one event and safe for non-Dev
+-- roles). Used by the Dev dashboard to show unassigned clans available to
+-- add to an event.
+create or replace function list_dev_clans()
+returns table (clan_id uuid, display_name text, prefix text, event_id uuid)
+language sql
+security definer
+stable
+as $$
+  select c.id, c.display_name, c.prefix, c.event_id
+  from clans c
+  where current_is_dev();
 $$;
 
 -- Regenerates a single clan's password for one role, invalidating the old one.

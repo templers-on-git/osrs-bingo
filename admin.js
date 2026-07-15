@@ -9,9 +9,15 @@ export async function createEvent(supabase, { name, endTimeUtc }) {
   return data;
 }
 
-export async function addClanToEvent(supabase, eventId, displayName) {
+export async function listEvents(supabase) {
+  const { data, error } = await supabase.from("events").select();
+  if (error) throw error;
+  return data;
+}
+
+export async function createClan(supabase, { displayName, prefix }) {
   const { data, error } = await supabase
-    .rpc("create_clan", { p_event_id: eventId, p_display_name: displayName })
+    .rpc("create_clan", { p_display_name: displayName, p_prefix: prefix })
     .single();
 
   if (error) throw error;
@@ -20,6 +26,22 @@ export async function addClanToEvent(supabase, eventId, displayName) {
     adminPassword: data.admin_password,
     playerPassword: data.player_password,
   };
+}
+
+export async function assignClanToEvent(supabase, clanId, eventId) {
+  const { error } = await supabase.rpc("assign_clan_to_event", { p_clan_id: clanId, p_event_id: eventId });
+  if (error) throw error;
+}
+
+export async function listClans(supabase) {
+  const { data, error } = await supabase.rpc("list_dev_clans");
+  if (error) throw error;
+  return data.map((c) => ({
+    clanId: c.clan_id,
+    displayName: c.display_name,
+    prefix: c.prefix,
+    eventId: c.event_id,
+  }));
 }
 
 export async function elevateToDev(supabase, password) {

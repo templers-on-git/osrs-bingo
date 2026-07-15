@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createEvent, addClanToEvent, elevateToDev } from "./admin.js";
+import { createEvent, listEvents, createClan, assignClanToEvent, listClans, elevateToDev } from "./admin.js";
 
 describe("createEvent", () => {
   it("inserts a draft event and returns it", async () => {
@@ -32,8 +32,22 @@ describe("createEvent", () => {
   });
 });
 
-describe("addClanToEvent", () => {
-  it("calls create_clan and returns the new clan's id and passwords", async () => {
+describe("listEvents", () => {
+  it("selects all events", async () => {
+    const events = [{ id: "event-1", name: "Winter ToA Bingo", status: "draft" }];
+    const select = vi.fn().mockResolvedValue({ data: events, error: null });
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listEvents(fakeSupabase);
+
+    expect(from).toHaveBeenCalledWith("events");
+    expect(result).toEqual(events);
+  });
+});
+
+describe("createClan", () => {
+  it("calls create_clan (no event_id) and returns the new clan's id and passwords", async () => {
     // create_clan is a Postgres function (an "RPC"), not a table insert, so the
     // fake client shape is .rpc(name, args).single() instead of .from().insert()...
     const single = vi.fn().mockResolvedValue({
@@ -43,17 +57,56 @@ describe("addClanToEvent", () => {
     const rpc = vi.fn(() => ({ single }));
     const fakeSupabase = { rpc };
 
-    const clan = await addClanToEvent(fakeSupabase, "event-1", "Iron Foundry");
+    const clan = await createClan(fakeSupabase, { displayName: "Iron Foundry", prefix: "IF" });
 
     expect(rpc).toHaveBeenCalledWith("create_clan", {
-      p_event_id: "event-1",
       p_display_name: "Iron Foundry",
+      p_prefix: "IF",
     });
     expect(clan).toEqual({
       clanId: "clan-1",
       adminPassword: "ABCD123456",
       playerPassword: "WXYZ987654",
     });
+  });
+});
+
+describe("assignClanToEvent", () => {
+  it("calls assign_clan_to_event with the given clan and event ids", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    const fakeSupabase = { rpc };
+
+    await assignClanToEvent(fakeSupabase, "clan-1", "event-1");
+
+    expect(rpc).toHaveBeenCalledWith("assign_clan_to_event", { p_clan_id: "clan-1", p_event_id: "event-1" });
+  });
+
+  it("passes null as event_id to unassign a clan", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    const fakeSupabase = { rpc };
+
+    await assignClanToEvent(fakeSupabase, "clan-1", null);
+
+    expect(rpc).toHaveBeenCalledWith("assign_clan_to_event", { p_clan_id: "clan-1", p_event_id: null });
+  });
+});
+
+describe("listClans", () => {
+  it("calls list_dev_clans and returns every clan regardless of event assignment", async () => {
+    const clans = [
+      { clan_id: "clan-1", display_name: "Iron Foundry", prefix: "IF", event_id: "event-1" },
+      { clan_id: "clan-2", display_name: "Rune Reapers", prefix: "RR", event_id: null },
+    ];
+    const rpc = vi.fn().mockResolvedValue({ data: clans, error: null });
+    const fakeSupabase = { rpc };
+
+    const result = await listClans(fakeSupabase);
+
+    expect(rpc).toHaveBeenCalledWith("list_dev_clans");
+    expect(result).toEqual([
+      { clanId: "clan-1", displayName: "Iron Foundry", prefix: "IF", eventId: "event-1" },
+      { clanId: "clan-2", displayName: "Rune Reapers", prefix: "RR", eventId: null },
+    ]);
   });
 });
 
