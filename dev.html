@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>osrs-bingo — Dev</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Dev Login Screen -->
+  <div id="name-screen">
+    <div class="name-card">
+      <div class="logo">🛠️</div>
+      <h1>Dev Access</h1>
+      <p>Enter the Dev master password</p>
+      <input type="password" id="name-input" placeholder="Master password" autocomplete="off">
+      <button id="name-btn">Unlock</button>
+      <p id="login-error" class="error-text hidden"></p>
+    </div>
+  </div>
+
+  <!-- Dev Dashboard (placeholder — event/clan management comes next) -->
+  <div id="dashboard" class="hidden">
+    <header>
+      <h1>🛠️ osrs-bingo — Dev</h1>
+      <div class="header-right">
+        <span class="playing-as">Logged in as <strong>Dev</strong></span>
+        <button class="btn-ghost" id="logout-btn">Log out</button>
+      </div>
+    </header>
+    <main>
+      <p>Dev dashboard — event/clan management coming next.</p>
+    </main>
+  </div>
+
+  <script type="module" src="dev.js"></script>
+</body>
+</html>

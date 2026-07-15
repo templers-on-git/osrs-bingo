@@ -89,6 +89,8 @@ body {
 
 #name-btn:hover { background: var(--gold-light); }
 
+.error-text { color: #d96a6a; font-size: 14px; margin-top: 12px; }
+
 /* ── Header ── */
 header {
   background: var(--surface);

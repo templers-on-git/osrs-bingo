@@ -17,16 +17,28 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
+// Browsers send a CORS preflight (OPTIONS) before the real POST when calling
+// a different origin — without these headers on every response, the
+// preflight is rejected and the browser never even attempts the POST.
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: CORS_HEADERS });
+  }
+
   if (req.method !== "POST") {
-    return new Response("Method not allowed", { status: 405 });
+    return new Response("Method not allowed", { status: 405, headers: CORS_HEADERS });
   }
 
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) {
     return new Response(JSON.stringify({ error: "sign in anonymously first" }), {
       status: 401,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
 
@@ -36,7 +48,7 @@ Deno.serve(async (req) => {
   if (!ign || !password) {
     return new Response(JSON.stringify({ error: "ign and password are required" }), {
       status: 400,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
 
@@ -48,7 +60,7 @@ Deno.serve(async (req) => {
   if (userError || !userData?.user) {
     return new Response(JSON.stringify({ error: "invalid session" }), {
       status: 401,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
 
@@ -62,13 +74,13 @@ Deno.serve(async (req) => {
     console.error(matchError);
     return new Response(JSON.stringify({ error: "internal error" }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
   if (!match) {
     return new Response(JSON.stringify({ error: "invalid password" }), {
       status: 401,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
 
@@ -86,12 +98,12 @@ Deno.serve(async (req) => {
     console.error(updateError);
     return new Response(JSON.stringify({ error: "internal error" }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
     });
   }
 
   return new Response(JSON.stringify({ clan_role: match.role }), {
     status: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
   });
 });
