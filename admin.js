@@ -79,6 +79,86 @@ export async function regenerateClanPassword(supabase, clanId, role) {
   return data;
 }
 
+export async function createTile(supabase, eventId, { name, points, tileType, config }) {
+  const { data, error } = await supabase
+    .from("tiles")
+    .insert({ event_id: eventId, name, points, tile_type: tileType, config })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function listTiles(supabase, eventId) {
+  const { data, error } = await supabase.from("tiles").select().eq("event_id", eventId);
+  if (error) throw error;
+  return data;
+}
+
+export async function updateTile(supabase, tileId, { name, points, tileType, config }) {
+  const { error } = await supabase
+    .from("tiles")
+    .update({ name, points, tile_type: tileType, config })
+    .eq("id", tileId);
+
+  if (error) throw error;
+}
+
+export async function deleteTile(supabase, tileId) {
+  const { error } = await supabase.from("tiles").delete().eq("id", tileId);
+  if (error) throw error;
+}
+
+export async function createItem(supabase, { name, photoUrl }) {
+  const { data, error } = await supabase.from("items").insert({ name, photo_url: photoUrl }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listItems(supabase) {
+  const { data, error } = await supabase.from("items").select();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteItem(supabase, itemId) {
+  const { error } = await supabase.from("items").delete().eq("id", itemId);
+  if (error) throw error;
+}
+
+export async function createItemSet(supabase, { name }) {
+  const { data, error } = await supabase.from("item_sets").insert({ name }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listItemSets(supabase) {
+  const { data, error } = await supabase.from("item_sets").select();
+  if (error) throw error;
+  return data;
+}
+
+export async function deleteItemSet(supabase, itemSetId) {
+  const { error } = await supabase.from("item_sets").delete().eq("id", itemSetId);
+  if (error) throw error;
+}
+
+export async function addItemToSet(supabase, itemSetId, itemId) {
+  const { error } = await supabase.from("item_set_members").insert({ item_set_id: itemSetId, item_id: itemId });
+  if (error) throw error;
+}
+
+export async function removeItemFromSet(supabase, itemSetId, itemId) {
+  const { error } = await supabase
+    .from("item_set_members")
+    .delete()
+    .eq("item_set_id", itemSetId)
+    .eq("item_id", itemId);
+
+  if (error) throw error;
+}
+
 export async function elevateToDev(supabase, password) {
   const { error } = await supabase.functions.invoke("dev-elevate", { body: { password } });
   if (error) throw error;

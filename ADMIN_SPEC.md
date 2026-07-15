@@ -9,7 +9,7 @@ Cascading permissions, each level includes everything below it:
 **Dev ⊇ Admin ⊇ Player**
 
 - **Player** — belongs to exactly one clan. Can freely "sign up" for tiles (broadcast "I'm working on this" to the clan, no gating/proof required in-app). Sees own clan's full analytics... no — sees only points totals for other clans, not their own detailed analytics (see Privacy below).
-- **Admin** — belongs to exactly one clan. Everything a Player can do (Admins are still players — they sign up for tiles too), plus: an Admin view for updating tile progress/completion for their own clan, an Analytics page (own clan's full detail, other clans' totals only), and can rename their own clan's display name.
+- **Admin** — belongs to exactly one clan. Everything a Player can do (Admins are still players — they sign up for tiles too), plus: can create/edit/delete tiles on their event's board (the board is shared across all clans in that event, so one Admin's edit is visible to every clan — not a per-clan board), an Admin view for updating tile progress/completion for their own clan, an Analytics page (own clan's full detail, other clans' totals only), and can rename their own clan's display name.
 - **Dev** — not scoped to any clan. Builds and publishes boards/events, adds clans to an event as it progresses, can see and act on every clan's data, sees full analytics across all clans, and holds the only reference to real clan IDs (see Clan below). The Dev is also a normal clan's Admin/Player day-to-day — Dev status is an *elevation* layered on top of a normal per-clan login, not a replacement for it (see Auth below).
 
 Proof-of-completion (screenshots etc.) happens entirely outside the app, on Discord — the app never stores or reviews proof images.
@@ -19,7 +19,7 @@ Proof-of-completion (screenshots etc.) happens entirely outside the app, on Disc
 - **Event** — id, name, board (the published template), UTC end-timestamp, status (draft/published/finished), list of participating clans. Created by Dev only. The app is meant to be reused for future events, so an event owns its own board/tiles/points/clans independently of any other event.
 - **Clan** — id (real ID, hidden from Admin/Player, visible only to Dev), displayName (editable by that clan's own Admin), adminPassword, playerPassword. Belongs to one Event. Dev can add clans to an event mid-event.
 - **Clan-without-app / "shadow" clan** — for competing clans that don't use the app. Dev manually enters a name + score as plain inputs, shown in analytics/leaderboards alongside real clans. (Future: a hook to hydrate this automatically, e.g. from a spreadsheet, like v1 did — not built now.)
-- **BingoBoard** — the tile template, built once by Dev, attached to an Event, shared across all participating clans.
+- **BingoBoard** — the tile template, attached to an Event, shared across all participating clans. Built/edited by Dev or by any Admin in that event (see Roles above) — the board isn't Dev-exclusive, only clan-progress is scoped per clan.
 - **Tile** (base) — id, name, points, type. Defines the *rule*. Five types:
   1. **Complete Once** — single completion flag.
   2. **Complete X Times** — counter toward a target X.
