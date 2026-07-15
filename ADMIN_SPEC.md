@@ -70,4 +70,5 @@ Status (as of 2026-07-15): Supabase project set up, schema + RLS live, Dev maste
 
 - **Editing a clan's name/prefix after creation** — no update function or UI exists yet, on either the Dev or (future) Admin side. Per the Auth section above, renaming is meant to be an Admin action on their own clan, not a Dev action, but neither is built. Flagged during Dev-dashboard work on 2026-07-15 — Liel explicitly wants this picked up later, not forgotten.
 - Board building (tiles UI) — not started at all.
-- Player/Admin-side login page and views — the `login` Edge Function exists and works, but there's no frontend for it yet (only the Dev side has a page).
+- Player/Admin **board/tile view** — `login.html`/`login.js` exist and work (log in, session persists, shows ign + role), but only as a placeholder screen. No board, no tile progress, nothing beyond confirming you're logged in.
+- Event lifecycle beyond draft/published — Dev can now toggle Publish/Unpublish, but "finished" (via timer, admin consensus, or Dev override, per the Event lifecycle section above) isn't built at all.
