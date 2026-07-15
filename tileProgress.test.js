@@ -3,8 +3,10 @@ import {
   isTileComplete,
   getTileProgress,
   markTileComplete,
+  unmarkTileComplete,
   incrementTileProgress,
   collectItemForTile,
+  uncollectItemForTile,
   listClanTileProgress,
 } from "./tileProgress.js";
 
@@ -251,6 +253,33 @@ describe("markTileComplete", () => {
   });
 });
 
+describe("unmarkTileComplete", () => {
+  it("upserts the tile_progress row as not completed", async () => {
+    const updatedRow = {
+      tile_id: "tile-1",
+      clan_id: "clan-1",
+      current_count: 0,
+      collected_item_ids: [],
+      completed: false,
+      completed_at: null,
+    };
+    const single = vi.fn().mockResolvedValue({ data: updatedRow, error: null });
+    const select = vi.fn(() => ({ single }));
+    const upsert = vi.fn(() => ({ select }));
+    const from = vi.fn(() => ({ upsert }));
+    const fakeSupabase = { from };
+
+    const progress = await unmarkTileComplete(fakeSupabase, "tile-1", "clan-1");
+
+    expect(from).toHaveBeenCalledWith("tile_progress");
+    expect(upsert).toHaveBeenCalledWith(
+      { tile_id: "tile-1", clan_id: "clan-1", completed: false, completed_at: null },
+      { onConflict: "tile_id,clan_id" },
+    );
+    expect(progress.completed).toBe(false);
+  });
+});
+
 describe("incrementTileProgress", () => {
   const tile = { id: "tile-1", tileType: "complete_x_times", config: { target: 5 } };
 
@@ -369,6 +398,52 @@ describe("collectItemForTile", () => {
     const { fakeSupabase, upsert } = fakeReadThenWrite(existingRow, updatedRow);
 
     await collectItemForTile(fakeSupabase, tile, "clan-1", "item-1");
+
+    expect(upsert).toHaveBeenCalledWith(
+      { tile_id: "tile-1", clan_id: "clan-1", collected_item_ids: ["item-1"], completed: false, completed_at: null },
+      { onConflict: "tile_id,clan_id" },
+    );
+  });
+});
+
+describe("uncollectItemForTile", () => {
+  const tile = { id: "tile-1", tileType: "collect_one_of_each", config: { itemIds: ["item-1", "item-2"] } };
+
+  it("removes the item and reverts to incomplete if it was previously the last one needed", async () => {
+    const existingRow = {
+      tile_id: "tile-1",
+      clan_id: "clan-1",
+      current_count: 0,
+      collected_item_ids: ["item-1", "item-2"],
+      completed: true,
+      completed_at: "2026-07-15T12:00:00.000Z",
+    };
+    const updatedRow = { ...existingRow, collected_item_ids: ["item-1"], completed: false, completed_at: null };
+    const { fakeSupabase, upsert } = fakeReadThenWrite(existingRow, updatedRow);
+
+    const progress = await uncollectItemForTile(fakeSupabase, tile, "clan-1", "item-2");
+
+    expect(upsert).toHaveBeenCalledWith(
+      { tile_id: "tile-1", clan_id: "clan-1", collected_item_ids: ["item-1"], completed: false, completed_at: null },
+      { onConflict: "tile_id,clan_id" },
+    );
+    expect(progress.collectedItemIds).toEqual(["item-1"]);
+    expect(progress.completed).toBe(false);
+  });
+
+  it("does nothing destructive when removing an item that was never collected", async () => {
+    const existingRow = {
+      tile_id: "tile-1",
+      clan_id: "clan-1",
+      current_count: 0,
+      collected_item_ids: ["item-1"],
+      completed: false,
+      completed_at: null,
+    };
+    const updatedRow = { ...existingRow };
+    const { fakeSupabase, upsert } = fakeReadThenWrite(existingRow, updatedRow);
+
+    await uncollectItemForTile(fakeSupabase, tile, "clan-1", "item-2");
 
     expect(upsert).toHaveBeenCalledWith(
       { tile_id: "tile-1", clan_id: "clan-1", collected_item_ids: ["item-1"], completed: false, completed_at: null },

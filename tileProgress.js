@@ -45,6 +45,20 @@ export async function markTileComplete(supabase, tileId, clanId) {
   return rowToProgress(tileId, clanId, data);
 }
 
+export async function unmarkTileComplete(supabase, tileId, clanId) {
+  const { data, error } = await supabase
+    .from("tile_progress")
+    .upsert(
+      { tile_id: tileId, clan_id: clanId, completed: false, completed_at: null },
+      { onConflict: "tile_id,clan_id" },
+    )
+    .select()
+    .single();
+
+  if (error) throw error;
+  return rowToProgress(tileId, clanId, data);
+}
+
 export async function incrementTileProgress(supabase, tile, clanId, delta = 1) {
   const progress = await getTileProgress(supabase, tile.id, clanId);
   const currentCount = progress.currentCount + delta;
@@ -69,6 +83,25 @@ export async function collectItemForTile(supabase, tile, clanId, itemId, itemsBy
   const collectedItemIds = progress.collectedItemIds.includes(itemId)
     ? progress.collectedItemIds
     : [...progress.collectedItemIds, itemId];
+  const completed = isTileComplete(tile, { collectedItemIds }, itemsBySet);
+  const completedAt = completed ? new Date().toISOString() : null;
+
+  const { data, error } = await supabase
+    .from("tile_progress")
+    .upsert(
+      { tile_id: tile.id, clan_id: clanId, collected_item_ids: collectedItemIds, completed, completed_at: completedAt },
+      { onConflict: "tile_id,clan_id" },
+    )
+    .select()
+    .single();
+
+  if (error) throw error;
+  return rowToProgress(tile.id, clanId, data);
+}
+
+export async function uncollectItemForTile(supabase, tile, clanId, itemId, itemsBySet) {
+  const progress = await getTileProgress(supabase, tile.id, clanId);
+  const collectedItemIds = progress.collectedItemIds.filter((id) => id !== itemId);
   const completed = isTileComplete(tile, { collectedItemIds }, itemsBySet);
   const completedAt = completed ? new Date().toISOString() : null;
 
