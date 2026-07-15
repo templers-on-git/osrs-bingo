@@ -64,11 +64,15 @@ Three independent ways an event ends:
 - Business rules (tile-completion logic, event-end consensus, permission checks) live in plain testable functions in front of the database — keeps TDD practice close to ordinary JS rather than starting testing practice on SQL/RLS policies.
 - The custom password-per-role-per-clan login (see Auth) will be a small Supabase Edge Function rather than Supabase's built-in email/password auth, since the built-in flow assumes individual accounts.
 
-Status (as of 2026-07-15): Supabase project set up, schema + RLS live, Dev master-password login and a Dev dashboard built (create clan, create event, assign/unassign clan to event). See `supabase/` for the SQL/Edge Functions and `dev.html`/`dev.js` for the dashboard.
+Status (as of 2026-07-16): Supabase project set up, schema + RLS live, Dev master-password login and Dev dashboard built (create clan, create event, assign/unassign clan to event, item bank). Full board editor and a working Progress tab exist in `login.html`/`login.js`. See `supabase/` for the SQL/Edge Functions, `dev.html`/`dev.js` for the Dev dashboard, `login.html`/`login.js` for the Player/Admin app.
 
 ## Known gaps / not built yet
 
-- **Editing a clan's name/prefix** — Dev-side is done (`update_clan()` + a Rename button on the Dev dashboard, 2026-07-15). Per the Auth section above, the clan's own Admin is *also* meant to be able to rename their own clan — that Admin-side version still isn't built, pending the Admin pages themselves.
-- Board building (tiles UI) — not started at all.
-- Player/Admin **board/tile view** — `login.html`/`login.js` exist and work (log in, session persists, shows ign + role), but only as a placeholder screen. No board, no tile progress, nothing beyond confirming you're logged in.
-- Event lifecycle beyond draft/published — Dev can now toggle Publish/Unpublish, but "finished" (via timer, admin consensus, or Dev override, per the Event lifecycle section above) isn't built at all.
+- **Editing a clan's name/prefix** — Dev-side is done (`update_clan()` + a Rename button on the Dev dashboard). Per the Auth section above, the clan's own Admin is *also* meant to be able to rename their own clan — that Admin-side version still isn't built, pending Admin-specific pages beyond the current shared board/Progress tabs.
+- **Board building (tiles UI)** — done. Admins and Dev can create/edit/delete tiles of all 5 types, grouped under admin-defined point brackets, via the Edit tab in `login.html`.
+- **Player/Admin board/tile view** — done. View tab shows the full board (grouped by bracket, progress bars); Progress tab (Admin-only) lets an Admin actually update progress per tile type (toggle for Complete Once, +1/-1 for Complete X Times, an item/set viewer modal with click-to-collect for the 3 item-based types).
+- **Item bank** (name + photo per item, item sets with members) — done, Dev-only, via `dev.html`. Not yet equipment-slot-aware (see `FEATURE_IDEAS.md`).
+- **Player tile "sign-up" broadcasting** ("I'm working on this," no gating) — still not built. Distinct from progress/completion tracking, which is done.
+- Event lifecycle beyond draft/published — Dev can toggle Publish/Unpublish, but "finished" (via timer, admin consensus, or Dev override, per the Event lifecycle section above) isn't built at all.
+- **Analytics pages** (own-clan full detail, other-clans totals-only, exportable) — not built. `clan_totals()` (a safe cross-clan points-total RPC) exists in the backend but has no UI consuming it yet.
+- Admin's own-clan rename (see first bullet), and the "shadow clan" (manually-tracked non-app clan) entity — neither built yet.
