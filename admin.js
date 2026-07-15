@@ -20,6 +20,11 @@ export async function deleteEvent(supabase, eventId) {
   if (error) throw error;
 }
 
+export async function setEventStatus(supabase, eventId, status) {
+  const { error } = await supabase.from("events").update({ status }).eq("id", eventId);
+  if (error) throw error;
+}
+
 export async function createClan(supabase, { displayName, prefix }) {
   const { data, error } = await supabase
     .rpc("create_clan", { p_display_name: displayName, p_prefix: prefix })

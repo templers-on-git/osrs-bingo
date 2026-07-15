@@ -4,6 +4,7 @@ import {
   createEvent,
   listEvents,
   deleteEvent,
+  setEventStatus,
   createClan,
   assignClanToEvent,
   listClans,
@@ -111,10 +112,17 @@ function renderDashboard() {
       .map((c) => `<option value="${c.clanId}">${c.displayName}</option>`)
       .join("");
 
+    const publishToggle = event.status === "draft"
+      ? `<button class="btn-ghost" data-publish-event="${event.id}">Publish</button>`
+      : event.status === "published"
+        ? `<button class="btn-ghost" data-unpublish-event="${event.id}">Unpublish</button>`
+        : "";
+
     return `
       <div class="dev-event-card">
         <h3>
           ${event.name} <span class="dev-status">${event.status}</span>
+          ${publishToggle}
           <button class="btn-ghost" data-delete-event="${event.id}">Delete event</button>
         </h3>
         <p class="dev-muted">Ends: ${new Date(event.end_time_utc).toLocaleString()}</p>
@@ -213,6 +221,20 @@ eventsList.addEventListener("click", async (e) => {
       await deleteEvent(supabase, deleteEventId);
       await loadDashboard();
     }
+    return;
+  }
+
+  const publishEventId = e.target.dataset.publishEvent;
+  if (publishEventId) {
+    await setEventStatus(supabase, publishEventId, "published");
+    await loadDashboard();
+    return;
+  }
+
+  const unpublishEventId = e.target.dataset.unpublishEvent;
+  if (unpublishEventId) {
+    await setEventStatus(supabase, unpublishEventId, "draft");
+    await loadDashboard();
     return;
   }
 

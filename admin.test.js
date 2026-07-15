@@ -3,6 +3,7 @@ import {
   createEvent,
   listEvents,
   deleteEvent,
+  setEventStatus,
   createClan,
   assignClanToEvent,
   listClans,
@@ -131,6 +132,21 @@ describe("deleteEvent", () => {
 
     expect(from).toHaveBeenCalledWith("events");
     expect(del).toHaveBeenCalled();
+    expect(eq).toHaveBeenCalledWith("id", "event-1");
+  });
+});
+
+describe("setEventStatus", () => {
+  it("updates the event's status", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await setEventStatus(fakeSupabase, "event-1", "published");
+
+    expect(from).toHaveBeenCalledWith("events");
+    expect(update).toHaveBeenCalledWith({ status: "published" });
     expect(eq).toHaveBeenCalledWith("id", "event-1");
   });
 });
