@@ -245,7 +245,7 @@ function itemSetCardHtml(set) {
         ${members.length
           ? members.map((m) => `
             <li>
-              <span>${escapeAttr(m.name)}</span>
+              <span>${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb">` : ""}${escapeAttr(m.name)}</span>
               <button class="btn-ghost" data-remove-member="${m.id}" data-set-id="${set.id}">Remove</button>
             </li>`).join("")
           : "<li class=\"dev-empty\">No items yet</li>"}

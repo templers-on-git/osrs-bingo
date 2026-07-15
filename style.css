@@ -180,6 +180,8 @@ header h1 {
 .playing-as { font-size: 14px; color: var(--text-muted); }
 .playing-as strong { color: var(--gold); }
 
+.event-clan-display { font-size: 14px; color: var(--text-muted); }
+
 .btn-ghost {
   background: transparent;
   border: 1px solid var(--border);

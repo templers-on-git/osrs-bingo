@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createEvent,
   listEvents,
+  getEvent,
+  listEventClans,
   deleteEvent,
   setEventStatus,
   updateEventEndTime,
@@ -75,6 +77,40 @@ describe("listEvents", () => {
 
     expect(from).toHaveBeenCalledWith("events");
     expect(result).toEqual(events);
+  });
+});
+
+describe("getEvent", () => {
+  it("selects a single event by id", async () => {
+    const event = { id: "event-1", name: "Winter ToA Bingo", status: "published" };
+    const single = vi.fn().mockResolvedValue({ data: event, error: null });
+    const eq = vi.fn(() => ({ single }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await getEvent(fakeSupabase, "event-1");
+
+    expect(from).toHaveBeenCalledWith("events");
+    expect(eq).toHaveBeenCalledWith("id", "event-1");
+    expect(result).toEqual(event);
+  });
+});
+
+describe("listEventClans", () => {
+  it("calls list_clans for the given event and returns safe clan fields", async () => {
+    const clans = [
+      { clan_id: "clan-1", display_name: "Iron Foundry", is_shadow: false, shadow_score: null },
+    ];
+    const rpc = vi.fn().mockResolvedValue({ data: clans, error: null });
+    const fakeSupabase = { rpc };
+
+    const result = await listEventClans(fakeSupabase, "event-1");
+
+    expect(rpc).toHaveBeenCalledWith("list_clans", { p_event_id: "event-1" });
+    expect(result).toEqual([
+      { clanId: "clan-1", displayName: "Iron Foundry", isShadow: false, shadowScore: null },
+    ]);
   });
 });
 

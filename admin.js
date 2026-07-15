@@ -15,6 +15,25 @@ export async function listEvents(supabase) {
   return data;
 }
 
+export async function getEvent(supabase, eventId) {
+  const { data, error } = await supabase.from("events").select().eq("id", eventId).single();
+  if (error) throw error;
+  return data;
+}
+
+// Wraps the safe list_clans() RPC (no password hashes) — usable by any
+// logged-in Admin/Player in that event, not just Dev, unlike listClans below.
+export async function listEventClans(supabase, eventId) {
+  const { data, error } = await supabase.rpc("list_clans", { p_event_id: eventId });
+  if (error) throw error;
+  return data.map((c) => ({
+    clanId: c.clan_id,
+    displayName: c.display_name,
+    isShadow: c.is_shadow,
+    shadowScore: c.shadow_score,
+  }));
+}
+
 export async function deleteEvent(supabase, eventId) {
   const { error } = await supabase.from("events").delete().eq("id", eventId);
   if (error) throw error;

@@ -1,6 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { login } from "./auth.js";
 import {
+  getEvent,
+  listEventClans,
   listTiles,
   createTile,
   updateTile,
@@ -26,6 +28,7 @@ const loginError = document.getElementById("login-error");
 const ignDisplay = document.getElementById("ign-display");
 const roleDisplay = document.getElementById("role-display");
 const logoutBtn = document.getElementById("logout-btn");
+const eventClanDisplay = document.getElementById("event-clan-display");
 
 const adminTabs = document.getElementById("admin-tabs");
 const viewTabBtn = document.getElementById("view-tab-btn");
@@ -268,14 +271,19 @@ async function loadBoard() {
   currentClanId = clan_id;
   currentEventId = event_id;
 
-  const [tileRows, bracketRows, progressRows] = await Promise.all([
+  const [tileRows, bracketRows, progressRows, event, eventClans] = await Promise.all([
     listTiles(supabase, event_id),
     listBrackets(supabase, event_id),
     listClanTileProgress(supabase, clan_id),
+    getEvent(supabase, event_id),
+    listEventClans(supabase, event_id),
   ]);
   tiles = tileRows;
   brackets = bracketRows;
   progressByTileId = Object.fromEntries(progressRows.map((p) => [p.tileId, p]));
+
+  const ownClan = eventClans.find((c) => c.clanId === clan_id);
+  eventClanDisplay.textContent = ownClan ? `${event.name} — ${ownClan.displayName}` : event.name;
 
   renderBoard();
   renderBrackets();
