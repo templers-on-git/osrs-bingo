@@ -59,6 +59,15 @@ export async function deleteClan(supabase, clanId) {
   if (error) throw error;
 }
 
+export async function updateClan(supabase, clanId, { displayName, prefix }) {
+  const { error } = await supabase.rpc("update_clan", {
+    p_clan_id: clanId,
+    p_display_name: displayName,
+    p_prefix: prefix,
+  });
+  if (error) throw error;
+}
+
 export async function regenerateClanPassword(supabase, clanId, role) {
   const { data, error } = await supabase.rpc("regenerate_clan_password", { p_clan_id: clanId, p_role: role });
   if (error) throw error;

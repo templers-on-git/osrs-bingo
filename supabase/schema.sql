@@ -215,6 +215,24 @@ begin
 end;
 $$;
 
+-- Renames a clan (display name and/or prefix). Dev-only for now — per
+-- ADMIN_SPEC.md, a clan's own Admin is *meant* to be able to rename their
+-- own clan too, but that's future Admin-side work; this is the Dev-only
+-- version, same reasoning as create_clan above.
+create or replace function update_clan(p_clan_id uuid, p_display_name text, p_prefix text)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  if not current_is_dev() then
+    raise exception 'dev only';
+  end if;
+
+  update clans set display_name = p_display_name, prefix = p_prefix where id = p_clan_id;
+end;
+$$;
+
 -- Regenerates a single clan's password for one role, invalidating the old one.
 -- Use this for "lost password" instead of ever clearing/resetting tables.
 -- Dev-only, same reasoning as create_clan above — this one had NO check at

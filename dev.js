@@ -9,6 +9,7 @@ import {
   assignClanToEvent,
   listClans,
   deleteClan,
+  updateClan,
   regenerateClanPassword,
 } from "./admin.js";
 
@@ -92,6 +93,7 @@ function clanRowHtml(c, { showRemove }) {
       <span>${c.displayName}${c.prefix ? ` (${c.prefix})` : ""}</span>
       <span class="dev-row-actions">
         ${showRemove ? `<button class="btn-ghost" data-remove-clan="${c.clanId}">Remove</button>` : ""}
+        <button class="btn-ghost" data-rename-clan="${c.clanId}">Rename</button>
         <button class="btn-ghost" data-regen="${c.clanId}" data-role="admin">Regen admin pw</button>
         <button class="btn-ghost" data-regen="${c.clanId}" data-role="player">Regen player pw</button>
         <button class="btn-ghost" data-delete-clan="${c.clanId}">Delete</button>
@@ -208,6 +210,17 @@ async function handleClanListClick(e) {
   const removeClanId = e.target.dataset.removeClan;
   if (removeClanId) {
     await assignClanToEvent(supabase, removeClanId, null);
+    await loadDashboard();
+    return;
+  }
+
+  const renameClanId = e.target.dataset.renameClan;
+  if (renameClanId) {
+    const clan = clans.find((c) => c.clanId === renameClanId);
+    const displayName = prompt("New clan name:", clan?.displayName ?? "");
+    if (!displayName) return;
+    const prefix = prompt("New prefix (optional):", clan?.prefix ?? "") || null;
+    await updateClan(supabase, renameClanId, { displayName, prefix });
     await loadDashboard();
   }
 }

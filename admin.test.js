@@ -8,6 +8,7 @@ import {
   assignClanToEvent,
   listClans,
   deleteClan,
+  updateClan,
   regenerateClanPassword,
   elevateToDev,
 } from "./admin.js";
@@ -159,6 +160,21 @@ describe("deleteClan", () => {
     await deleteClan(fakeSupabase, "clan-1");
 
     expect(rpc).toHaveBeenCalledWith("delete_clan", { p_clan_id: "clan-1" });
+  });
+});
+
+describe("updateClan", () => {
+  it("calls update_clan with the new display name and prefix", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    const fakeSupabase = { rpc };
+
+    await updateClan(fakeSupabase, "clan-1", { displayName: "Rune Reapers", prefix: "RR" });
+
+    expect(rpc).toHaveBeenCalledWith("update_clan", {
+      p_clan_id: "clan-1",
+      p_display_name: "Rune Reapers",
+      p_prefix: "RR",
+    });
   });
 });
 
