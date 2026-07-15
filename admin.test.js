@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createEvent, addClanToEvent } from "./admin.js";
+import { createEvent, addClanToEvent, elevateToDev } from "./admin.js";
 
 describe("createEvent", () => {
   it("inserts a draft event and returns it", async () => {
@@ -54,5 +54,27 @@ describe("addClanToEvent", () => {
       adminPassword: "ABCD123456",
       playerPassword: "WXYZ987654",
     });
+  });
+});
+
+describe("elevateToDev", () => {
+  it("calls the dev-elevate function and refreshes the session on success", async () => {
+    const invoke = vi.fn().mockResolvedValue({ data: { is_dev: true }, error: null });
+    const refreshSession = vi.fn().mockResolvedValue({ data: {}, error: null });
+    const fakeSupabase = { functions: { invoke }, auth: { refreshSession } };
+
+    await elevateToDev(fakeSupabase, "master-password-123");
+
+    expect(invoke).toHaveBeenCalledWith("dev-elevate", { body: { password: "master-password-123" } });
+    expect(refreshSession).toHaveBeenCalled();
+  });
+
+  it("throws and does not refresh the session when the password is wrong", async () => {
+    const invoke = vi.fn().mockResolvedValue({ data: null, error: { message: "invalid password" } });
+    const refreshSession = vi.fn();
+    const fakeSupabase = { functions: { invoke }, auth: { refreshSession } };
+
+    await expect(elevateToDev(fakeSupabase, "wrong-password")).rejects.toThrow();
+    expect(refreshSession).not.toHaveBeenCalled();
   });
 });

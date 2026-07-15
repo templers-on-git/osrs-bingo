@@ -175,3 +175,32 @@ end;
 $$;
 
 revoke all on function login_with_password(text) from public, anon, authenticated;
+
+-- Singleton table holding the one Dev master password. There is never more
+-- than one row (enforced by the boolean primary key trick: id can only ever
+-- be `true`). Set/rotate it manually via the SQL editor:
+--   insert into dev_settings (id, master_password_hash) values (true, crypt('choose-a-password', gen_salt('bf')))
+--   on conflict (id) do update set master_password_hash = excluded.master_password_hash;
+-- Deliberately no app-facing function to set this — same reasoning as the
+-- rest of the password model, see regenerate_clan_password.
+create table if not exists dev_settings (
+  id boolean primary key default true,
+  constraint dev_settings_singleton check (id),
+  master_password_hash text not null
+);
+
+revoke all on dev_settings from anon, authenticated;
+
+-- Only ever called from the dev-elevate Edge Function using the service
+-- role key — never exposed to anon/authenticated clients directly, since
+-- it's a brute-forceable password check (same reasoning as login_with_password).
+create or replace function check_dev_password(p_password text)
+returns boolean
+language sql
+security definer
+as $$
+  select master_password_hash = crypt(p_password, master_password_hash)
+  from dev_settings where id = true;
+$$;
+
+revoke all on function check_dev_password(text) from public, anon, authenticated;

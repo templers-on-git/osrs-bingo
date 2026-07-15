@@ -21,3 +21,11 @@ export async function addClanToEvent(supabase, eventId, displayName) {
     playerPassword: data.player_password,
   };
 }
+
+export async function elevateToDev(supabase, password) {
+  const { error } = await supabase.functions.invoke("dev-elevate", { body: { password } });
+  if (error) throw error;
+
+  const { error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError) throw refreshError;
+}
