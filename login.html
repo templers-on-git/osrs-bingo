@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TOA Bingo — Log In</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Login Screen -->
+  <div id="name-screen">
+    <div class="name-card">
+      <div class="logo">⚔️</div>
+      <h1>TOA Bingo</h1>
+      <p>Log in with your clan's password</p>
+      <input type="text" id="ign-input" class="card-input" placeholder="Your RuneScape name" maxlength="12" autocomplete="off">
+      <input type="password" id="password-input" class="card-input" placeholder="Clan password" autocomplete="off">
+      <button id="login-btn" class="card-btn">Log In</button>
+      <p id="login-error" class="error-text hidden"></p>
+    </div>
+  </div>
+
+  <!-- Logged-in placeholder (board/tile view comes later) -->
+  <div id="loggedin-screen" class="hidden">
+    <header>
+      <h1>⚔️ TOA Bingo</h1>
+      <div class="header-right">
+        <span class="playing-as">Playing as <strong id="ign-display"></strong> (<span id="role-display"></span>)</span>
+        <button class="btn-ghost" id="logout-btn">Log out</button>
+      </div>
+    </header>
+    <main>
+      <p>Logged in — board/tile view coming next.</p>
+    </main>
+  </div>
+
+  <script type="module" src="login.js"></script>
+</body>
+</html>

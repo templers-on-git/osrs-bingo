@@ -1,0 +1,27 @@
+{
+  "name": "osrs-bingo",
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/liel-marx-callaf/osrs-bingo.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/liel-marx-callaf/osrs-bingo/issues"
+  },
+  "homepage": "https://github.com/liel-marx-callaf/osrs-bingo#readme",
+  "description": "",
+  "type": "module",
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.6"
+  }
+}

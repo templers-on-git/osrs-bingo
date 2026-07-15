@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>osrs-bingo — Dev</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Dev Login Screen -->
+  <div id="name-screen">
+    <div class="name-card">
+      <div class="logo">🛠️</div>
+      <h1>Dev Access</h1>
+      <p>Enter the Dev master password</p>
+      <input type="password" id="name-input" placeholder="Master password" autocomplete="off">
+      <button id="name-btn">Unlock</button>
+      <p id="login-error" class="error-text hidden"></p>
+    </div>
+  </div>
+
+  <!-- Dev Dashboard (placeholder — event/clan management comes next) -->
+  <div id="dashboard" class="hidden">
+    <header>
+      <h1>🛠️ osrs-bingo — Dev</h1>
+      <div class="header-right">
+        <span class="playing-as">Logged in as <strong>Dev</strong></span>
+        <button class="btn-ghost" id="logout-btn">Log out</button>
+      </div>
+    </header>
+    <main>
+      <div id="new-clan-passwords" class="dev-callout hidden"></div>
+
+      <section class="dev-section">
+        <h2>Create Clan</h2>
+        <div class="dev-form">
+          <input id="clan-name-input" placeholder="Clan name" autocomplete="off">
+          <input id="clan-prefix-input" placeholder="Prefix (optional)" autocomplete="off" maxlength="6">
+          <button id="create-clan-btn">Create Clan</button>
+        </div>
+      </section>
+
+      <section class="dev-section">
+        <h2>Create Event</h2>
+        <div class="dev-form">
+          <input id="event-name-input" placeholder="Event name" autocomplete="off">
+          <input id="event-end-input" type="datetime-local">
+          <button id="create-event-btn">Create Event</button>
+        </div>
+      </section>
+
+      <section class="dev-section">
+        <h2>Unassigned Clans</h2>
+        <ul id="unassigned-clans-list" class="dev-list"></ul>
+      </section>
+
+      <section class="dev-section">
+        <h2>Events</h2>
+        <div id="events-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="dev.js"></script>
+</body>
+</html>
