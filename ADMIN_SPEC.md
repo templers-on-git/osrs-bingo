@@ -9,7 +9,7 @@ Cascading permissions, each level includes everything below it:
 **Dev ⊇ Admin ⊇ Player**
 
 - **Player** — belongs to exactly one clan. Can freely "sign up" for tiles (broadcast "I'm working on this" to the clan, no gating/proof required in-app). Sees own clan's full analytics... no — sees only points totals for other clans, not their own detailed analytics (see Privacy below).
-- **Admin** — belongs to exactly one clan. Everything a Player can do (Admins are still players — they sign up for tiles too), plus: an Admin view for updating tile progress/completion for their own clan, an Analytics page (own clan's full detail, other clans' totals only), and can rename their own clan's display name.
+- **Admin** — belongs to exactly one clan. Everything a Player can do (Admins are still players — they sign up for tiles too), plus: can create/edit/delete tiles on their event's board (the board is shared across all clans in that event, so one Admin's edit is visible to every clan — not a per-clan board), an Admin view for updating tile progress/completion for their own clan, an Analytics page (own clan's full detail, other clans' totals only), and can rename their own clan's display name.
 - **Dev** — not scoped to any clan. Builds and publishes boards/events, adds clans to an event as it progresses, can see and act on every clan's data, sees full analytics across all clans, and holds the only reference to real clan IDs (see Clan below). The Dev is also a normal clan's Admin/Player day-to-day — Dev status is an *elevation* layered on top of a normal per-clan login, not a replacement for it (see Auth below).
 
 Proof-of-completion (screenshots etc.) happens entirely outside the app, on Discord — the app never stores or reviews proof images.
@@ -19,7 +19,7 @@ Proof-of-completion (screenshots etc.) happens entirely outside the app, on Disc
 - **Event** — id, name, board (the published template), UTC end-timestamp, status (draft/published/finished), list of participating clans. Created by Dev only. The app is meant to be reused for future events, so an event owns its own board/tiles/points/clans independently of any other event.
 - **Clan** — id (real ID, hidden from Admin/Player, visible only to Dev), displayName (editable by that clan's own Admin), adminPassword, playerPassword. Belongs to one Event. Dev can add clans to an event mid-event.
 - **Clan-without-app / "shadow" clan** — for competing clans that don't use the app. Dev manually enters a name + score as plain inputs, shown in analytics/leaderboards alongside real clans. (Future: a hook to hydrate this automatically, e.g. from a spreadsheet, like v1 did — not built now.)
-- **BingoBoard** — the tile template, built once by Dev, attached to an Event, shared across all participating clans.
+- **BingoBoard** — the tile template, attached to an Event, shared across all participating clans. Built/edited by Dev or by any Admin in that event (see Roles above) — the board isn't Dev-exclusive, only clan-progress is scoped per clan.
 - **Tile** (base) — id, name, points, type. Defines the *rule*. Five types:
   1. **Complete Once** — single completion flag.
   2. **Complete X Times** — counter toward a target X.
@@ -64,11 +64,15 @@ Three independent ways an event ends:
 - Business rules (tile-completion logic, event-end consensus, permission checks) live in plain testable functions in front of the database — keeps TDD practice close to ordinary JS rather than starting testing practice on SQL/RLS policies.
 - The custom password-per-role-per-clan login (see Auth) will be a small Supabase Edge Function rather than Supabase's built-in email/password auth, since the built-in flow assumes individual accounts.
 
-Status (as of 2026-07-15): Supabase project set up, schema + RLS live, Dev master-password login and a Dev dashboard built (create clan, create event, assign/unassign clan to event). See `supabase/` for the SQL/Edge Functions and `dev.html`/`dev.js` for the dashboard.
+Status (as of 2026-07-16): Supabase project set up, schema + RLS live, Dev master-password login and Dev dashboard built (create clan, create event, assign/unassign clan to event, item bank). Full board editor and a working Progress tab exist in `login.html`/`login.js`. See `supabase/` for the SQL/Edge Functions, `dev.html`/`dev.js` for the Dev dashboard, `login.html`/`login.js` for the Player/Admin app.
 
 ## Known gaps / not built yet
 
-- **Editing a clan's name/prefix** — Dev-side is done (`update_clan()` + a Rename button on the Dev dashboard, 2026-07-15). Per the Auth section above, the clan's own Admin is *also* meant to be able to rename their own clan — that Admin-side version still isn't built, pending the Admin pages themselves.
-- Board building (tiles UI) — not started at all.
-- Player/Admin **board/tile view** — `login.html`/`login.js` exist and work (log in, session persists, shows ign + role), but only as a placeholder screen. No board, no tile progress, nothing beyond confirming you're logged in.
-- Event lifecycle beyond draft/published — Dev can now toggle Publish/Unpublish, but "finished" (via timer, admin consensus, or Dev override, per the Event lifecycle section above) isn't built at all.
+- **Editing a clan's name/prefix** — Dev-side is done (`update_clan()` + a Rename button on the Dev dashboard). Per the Auth section above, the clan's own Admin is *also* meant to be able to rename their own clan — that Admin-side version still isn't built, pending Admin-specific pages beyond the current shared board/Progress tabs.
+- **Board building (tiles UI)** — done. Admins and Dev can create/edit/delete tiles of all 5 types, grouped under admin-defined point brackets, via the Edit tab in `login.html`.
+- **Player/Admin board/tile view** — done. View tab shows the full board (grouped by bracket, progress bars); Progress tab (Admin-only) lets an Admin actually update progress per tile type (toggle for Complete Once, +1/-1 for Complete X Times, an item/set viewer modal with click-to-collect for the 3 item-based types).
+- **Item bank** (name + photo per item, item sets with members) — done, Dev-only, via `dev.html`. Not yet equipment-slot-aware (see `FEATURE_IDEAS.md`).
+- **Player tile "sign-up" broadcasting** ("I'm working on this," no gating) — still not built. Distinct from progress/completion tracking, which is done.
+- Event lifecycle beyond draft/published — Dev can toggle Publish/Unpublish, but "finished" (via timer, admin consensus, or Dev override, per the Event lifecycle section above) isn't built at all.
+- **Analytics pages** (own-clan full detail, other-clans totals-only, exportable) — not built. `clan_totals()` (a safe cross-clan points-total RPC) exists in the backend but has no UI consuming it yet.
+- Admin's own-clan rename (see first bullet), and the "shadow clan" (manually-tracked non-app clan) entity — neither built yet.

@@ -180,6 +180,8 @@ header h1 {
 .playing-as { font-size: 14px; color: var(--text-muted); }
 .playing-as strong { color: var(--gold); }
 
+.event-clan-display { font-size: 14px; color: var(--text-muted); }
+
 .btn-ghost {
   background: transparent;
   border: 1px solid var(--border);
@@ -327,6 +329,180 @@ main {
 .pts-3 { background: #b8961a; color: #0f1117; }
 .pts-2 { background: #2980b9; color: #fff; }
 .pts-1 { background: #555570; color: #fff; }
+.pts-badge.generic { background: var(--gold); color: #0f1117; }
+
+.btn-ghost.active { border-color: var(--gold); color: var(--gold); }
+
+/* ── Inline tile editing (Edit pane) ── */
+.tile-card.editing { border-color: var(--gold); }
+
+.tile-edit-form { flex-direction: column; align-items: stretch; }
+.tile-edit-form input, .tile-edit-form select { margin-bottom: 0; }
+
+/* ── Progress bar (replaces the old points pill inside each tile card) ── */
+.progress-bar {
+  height: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--gold);
+  transition: width 0.2s;
+}
+
+.tile-card.complete .progress-bar-fill { background: var(--complete-text); }
+
+/* ── Checkbox list (multi-select items/sets when building a tile) ── */
+.checkbox-search {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  margin-top: 10px;
+  outline: none;
+}
+
+.checkbox-search:focus { border-color: var(--gold); }
+
+.checkbox-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* ── Two-column item/set picker (All vs Selected) ── */
+.picker-columns {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+}
+
+.picker-column { flex: 1; min-width: 0; }
+.picker-column .checkbox-search { margin-top: 6px; }
+.picker-column .checkbox-list { margin-top: 10px; }
+
+.selected-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 6px;
+}
+
+.selected-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.selected-chip span { flex: 1; }
+
+.selected-remove {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.selected-remove:hover { color: #e07070; }
+
+/* ── Item bank (Dev dashboard) ── */
+.item-thumb {
+  width: 20px;
+  height: 20px;
+  object-fit: cover;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* ── Item/set viewer modal ── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal-box {
+  background: var(--surface);
+  border: 1px solid var(--gold);
+  border-radius: 12px;
+  padding: 20px 24px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.modal-header h3 { color: var(--gold); font-size: 18px; }
+
+.modal-set-group { margin-bottom: 18px; }
+.modal-set-group h4 { color: var(--text-muted); font-size: 14px; margin-bottom: 8px; }
+
+.item-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.item-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 14px;
+}
+
+.item-chip.item-collected { background: var(--claimed-bg); border-color: var(--claimed-border); }
+.item-chip.item-confirmed { background: var(--complete-bg); border-color: var(--complete-border); color: var(--complete-text); }
+
+.item-chip.clickable { cursor: pointer; transition: border-color 0.15s; }
+.item-chip.clickable:hover { border-color: var(--gold); }
 
 /* ── Tile Grid ── */
 .tile-grid {

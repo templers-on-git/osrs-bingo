@@ -15,6 +15,25 @@ export async function listEvents(supabase) {
   return data;
 }
 
+export async function getEvent(supabase, eventId) {
+  const { data, error } = await supabase.from("events").select().eq("id", eventId).single();
+  if (error) throw error;
+  return data;
+}
+
+// Wraps the safe list_clans() RPC (no password hashes) — usable by any
+// logged-in Admin/Player in that event, not just Dev, unlike listClans below.
+export async function listEventClans(supabase, eventId) {
+  const { data, error } = await supabase.rpc("list_clans", { p_event_id: eventId });
+  if (error) throw error;
+  return data.map((c) => ({
+    clanId: c.clan_id,
+    displayName: c.display_name,
+    isShadow: c.is_shadow,
+    shadowScore: c.shadow_score,
+  }));
+}
+
 export async function deleteEvent(supabase, eventId) {
   const { error } = await supabase.from("events").delete().eq("id", eventId);
   if (error) throw error;
@@ -77,6 +96,131 @@ export async function regenerateClanPassword(supabase, clanId, role) {
   const { data, error } = await supabase.rpc("regenerate_clan_password", { p_clan_id: clanId, p_role: role });
   if (error) throw error;
   return data;
+}
+
+export async function createBracket(supabase, eventId, { label, points }) {
+  const { data, error } = await supabase
+    .from("point_brackets")
+    .insert({ event_id: eventId, label, points })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+export async function listBrackets(supabase, eventId) {
+  const { data, error } = await supabase.from("point_brackets").select().eq("event_id", eventId);
+  if (error) throw error;
+  return data;
+}
+
+export async function updateBracket(supabase, bracketId, { label, points }) {
+  const { error } = await supabase.from("point_brackets").update({ label, points }).eq("id", bracketId);
+  if (error) throw error;
+}
+
+export async function deleteBracket(supabase, bracketId) {
+  const { error } = await supabase.from("point_brackets").delete().eq("id", bracketId);
+  if (error) throw error;
+}
+
+export async function createTile(supabase, eventId, { name, bracketId, tileType, config }) {
+  const { data, error } = await supabase
+    .from("tiles")
+    .insert({ event_id: eventId, name, bracket_id: bracketId, tile_type: tileType, config })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// Embeds each tile's bracket (point value + label) in one query rather than
+// a separate lookup — points now live only on the bracket, not the tile.
+export async function listTiles(supabase, eventId) {
+  const { data, error } = await supabase.from("tiles").select("*, point_brackets(*)").eq("event_id", eventId);
+  if (error) throw error;
+  return data;
+}
+
+export async function updateTile(supabase, tileId, { name, bracketId, tileType, config }) {
+  const { error } = await supabase
+    .from("tiles")
+    .update({ name, bracket_id: bracketId, tile_type: tileType, config })
+    .eq("id", tileId);
+
+  if (error) throw error;
+}
+
+export async function deleteTile(supabase, tileId) {
+  const { error } = await supabase.from("tiles").delete().eq("id", tileId);
+  if (error) throw error;
+}
+
+export async function createItem(supabase, { name, photoUrl }) {
+  const { data, error } = await supabase.from("items").insert({ name, photo_url: photoUrl }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listItems(supabase) {
+  const { data, error } = await supabase.from("items").select();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateItem(supabase, itemId, { name, photoUrl }) {
+  const { error } = await supabase.from("items").update({ name, photo_url: photoUrl }).eq("id", itemId);
+  if (error) throw error;
+}
+
+export async function deleteItem(supabase, itemId) {
+  const { error } = await supabase.from("items").delete().eq("id", itemId);
+  if (error) throw error;
+}
+
+export async function createItemSet(supabase, { name }) {
+  const { data, error } = await supabase.from("item_sets").insert({ name }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listItemSets(supabase) {
+  const { data, error } = await supabase.from("item_sets").select();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateItemSet(supabase, itemSetId, { name }) {
+  const { error } = await supabase.from("item_sets").update({ name }).eq("id", itemSetId);
+  if (error) throw error;
+}
+
+export async function deleteItemSet(supabase, itemSetId) {
+  const { error } = await supabase.from("item_sets").delete().eq("id", itemSetId);
+  if (error) throw error;
+}
+
+export async function addItemToSet(supabase, itemSetId, itemId) {
+  const { error } = await supabase.from("item_set_members").insert({ item_set_id: itemSetId, item_id: itemId });
+  if (error) throw error;
+}
+
+export async function removeItemFromSet(supabase, itemSetId, itemId) {
+  const { error } = await supabase
+    .from("item_set_members")
+    .delete()
+    .eq("item_set_id", itemSetId)
+    .eq("item_id", itemId);
+
+  if (error) throw error;
+}
+
+export async function listItemsInSet(supabase, itemSetId) {
+  const { data, error } = await supabase.from("item_set_members").select("items(*)").eq("item_set_id", itemSetId);
+  if (error) throw error;
+  return data.map((row) => row.items);
 }
 
 export async function elevateToDev(supabase, password) {

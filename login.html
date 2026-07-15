@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TOA Bingo — Log In</title>
+  <title>Templars Bingo Website — Log In</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
   <div id="name-screen">
     <div class="name-card">
       <div class="logo">⚔️</div>
-      <h1>TOA Bingo</h1>
+      <h1>Templars Bingo Website</h1>
       <p>Log in with your clan's password</p>
       <input type="text" id="ign-input" class="card-input" placeholder="Your RuneScape name" maxlength="12" autocomplete="off">
       <input type="password" id="password-input" class="card-input" placeholder="Clan password" autocomplete="off">
@@ -21,18 +21,108 @@
     </div>
   </div>
 
-  <!-- Logged-in placeholder (board/tile view comes later) -->
+  <!-- Logged-in screen: board (View), plus a board-editing screen (Edit) for Admins only -->
   <div id="loggedin-screen" class="hidden">
     <header>
-      <h1>⚔️ TOA Bingo</h1>
+      <h1>⚔️ Templars Bingo Website</h1>
+      <span class="event-clan-display" id="event-clan-display"></span>
+      <div id="admin-tabs" class="header-right hidden">
+        <button class="btn-ghost" id="view-tab-btn">View</button>
+        <button class="btn-ghost" id="edit-tab-btn">Edit</button>
+        <button class="btn-ghost" id="progress-tab-btn">Progress</button>
+      </div>
       <div class="header-right">
         <span class="playing-as">Playing as <strong id="ign-display"></strong> (<span id="role-display"></span>)</span>
         <button class="btn-ghost" id="logout-btn">Log out</button>
       </div>
     </header>
     <main>
-      <p>Logged in — board/tile view coming next.</p>
+      <!-- View: same rendering for Players and Admins -->
+      <div id="view-pane">
+        <div id="board-grid"></div>
+      </div>
+
+      <!-- Edit: Admin-only board management -->
+      <div id="edit-pane" class="hidden">
+        <section class="dev-section">
+          <h2>Point Brackets</h2>
+          <div class="dev-form">
+            <input id="bracket-label-input" placeholder="Bracket label (e.g. Hard)" autocomplete="off">
+            <input id="bracket-points-input" type="number" min="1" placeholder="Points">
+            <button id="create-bracket-btn">Add Bracket</button>
+          </div>
+          <ul id="brackets-list" class="dev-list"></ul>
+        </section>
+
+        <section class="dev-section">
+          <h2>Add Tile</h2>
+          <div class="dev-form">
+            <input id="tile-name-input" placeholder="Tile name" autocomplete="off">
+            <select id="tile-bracket-select"></select>
+            <select id="tile-type-select">
+              <option value="complete_once">Complete Once</option>
+              <option value="complete_x_times">Complete X Times</option>
+              <option value="collect_one_of_each">Collect One Of Each</option>
+              <option value="collect_k_of_y">Collect K Of Y</option>
+              <option value="n_sets">N Sets</option>
+            </select>
+            <input id="tile-target-input" type="number" min="1" placeholder="Target count" class="hidden">
+            <input id="tile-k-input" type="number" min="1" placeholder="K (how many needed)" class="hidden">
+            <select id="tile-mode-select" class="hidden">
+              <option value="one_of_each">One of each set</option>
+              <option value="full_set">One full set</option>
+              <option value="either">Either</option>
+            </select>
+            <button id="create-tile-btn">Add Tile</button>
+          </div>
+          <div id="tile-items-picker" class="picker-columns hidden">
+            <div class="picker-column">
+              <p class="dev-muted">All Items</p>
+              <input type="text" id="tile-items-search" class="checkbox-search" placeholder="Search items...">
+              <div id="tile-items-select" class="checkbox-list"></div>
+            </div>
+            <div class="picker-column">
+              <p class="dev-muted">Selected (<span id="tile-items-selected-count">0</span>)</p>
+              <div id="tile-items-selected" class="selected-list"></div>
+            </div>
+          </div>
+          <div id="tile-sets-picker" class="picker-columns hidden">
+            <div class="picker-column">
+              <p class="dev-muted">All Sets</p>
+              <input type="text" id="tile-sets-search" class="checkbox-search" placeholder="Search sets...">
+              <div id="tile-sets-select" class="checkbox-list"></div>
+            </div>
+            <div class="picker-column">
+              <p class="dev-muted">Selected (<span id="tile-sets-selected-count">0</span>)</p>
+              <div id="tile-sets-selected" class="selected-list"></div>
+            </div>
+          </div>
+          <p id="no-brackets-note" class="dev-muted hidden">Create a point bracket above before adding tiles.</p>
+        </section>
+
+        <section class="dev-section">
+          <h2>Board Tiles</h2>
+          <div id="edit-tiles-list"></div>
+        </section>
+      </div>
+
+      <!-- Progress: Admin-only, separate from Edit so marking progress during
+           a live event never risks a stray click on a tile-delete button -->
+      <div id="progress-pane" class="hidden">
+        <div id="progress-tiles-list"></div>
+      </div>
     </main>
+
+    <!-- Item/set viewer — read-only from View, click-to-collect from Progress -->
+    <div id="item-modal-overlay" class="modal-overlay hidden">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3 id="item-modal-title"></h3>
+          <button class="btn-ghost" id="item-modal-close">Close</button>
+        </div>
+        <div id="item-modal-body"></div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="login.js"></script>

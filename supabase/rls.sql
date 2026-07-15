@@ -80,6 +80,20 @@ create policy clans_select on clans for select using (
 
 create policy clans_dev_write on clans for all using (current_is_dev()) with check (current_is_dev());
 
+-- ── point_brackets (same access shape as tiles — shared board metadata) ──────
+
+alter table point_brackets enable row level security;
+
+create policy point_brackets_select on point_brackets for select using (
+  current_is_dev() or point_brackets.event_id = current_event_id()
+);
+
+create policy point_brackets_write on point_brackets for all using (
+  current_is_dev() or (current_role_claim() = 'admin' and point_brackets.event_id = current_event_id())
+) with check (
+  current_is_dev() or (current_role_claim() = 'admin' and point_brackets.event_id = current_event_id())
+);
+
 -- ── tiles (board is dev-authored, everyone in the event can read it) ─────────
 
 alter table tiles enable row level security;
@@ -88,7 +102,19 @@ create policy tiles_select on tiles for select using (
   current_is_dev() or tiles.event_id = current_event_id()
 );
 
-create policy tiles_dev_write on tiles for all using (current_is_dev()) with check (current_is_dev());
+-- Board is shared across all clans in an event, so any Admin in that event
+-- (not just Dev) can create/edit/delete its tiles — one Admin's edit affects
+-- every clan's view of the board, by design (per ADMIN_SPEC.md).
+-- Dropped explicitly (unlike the rest of this file) since this replaces the
+-- older Dev-only tiles_dev_write policy on an already-live database — a
+-- fresh run via reset.sql wouldn't have it to drop, but this makes the
+-- rename safe either way.
+drop policy if exists tiles_dev_write on tiles;
+create policy tiles_write on tiles for all using (
+  current_is_dev() or (current_role_claim() = 'admin' and tiles.event_id = current_event_id())
+) with check (
+  current_is_dev() or (current_role_claim() = 'admin' and tiles.event_id = current_event_id())
+);
 
 -- ── items / item_sets / item_set_members (shared bank, read-only to clans) ──
 
@@ -116,8 +142,15 @@ create policy tile_progress_select on tile_progress for select using (
 
 create policy tile_progress_dev_write on tile_progress for all using (current_is_dev()) with check (current_is_dev());
 
--- admins update their own clan's progress
-create policy tile_progress_admin_write on tile_progress for update using (
+-- Admins write their own clan's progress. `for all` (not just `for update`)
+-- is required: the app writes via upsert (INSERT ... ON CONFLICT DO UPDATE),
+-- since a tile_progress row doesn't exist until the first write on a given
+-- tile — an update-only policy would let RLS block that very first insert.
+-- Dropped explicitly (unlike the rest of this file) since this replaces an
+-- already-live update-only version of the same policy, same reasoning as
+-- the tiles_write rename above.
+drop policy if exists tile_progress_admin_write on tile_progress;
+create policy tile_progress_admin_write on tile_progress for all using (
   current_role_claim() = 'admin' and clan_id = current_clan_id()
 ) with check (
   current_role_claim() = 'admin' and clan_id = current_clan_id()
@@ -154,6 +187,8 @@ $$;
 
 -- ── cross-clan totals, safely, without exposing per-clan tile detail ────────
 
+-- Points now come from the tile's bracket (tiles.points was dropped —
+-- points live only on point_brackets, see schema.sql), hence the extra join.
 create or replace function clan_totals(p_event_id uuid)
 returns table (clan_id uuid, display_name text, total_points bigint)
 language sql
@@ -161,10 +196,11 @@ security definer
 stable
 as $$
   select c.id, c.display_name,
-    coalesce(sum(case when tp.completed then t.points else 0 end), 0)
+    coalesce(sum(case when tp.completed then pb.points else 0 end), 0)
   from clans c
   left join tile_progress tp on tp.clan_id = c.id
   left join tiles t on t.id = tp.tile_id
+  left join point_brackets pb on pb.id = t.bracket_id
   where c.event_id = p_event_id
   group by c.id, c.display_name;
 $$;

@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createEvent,
   listEvents,
+  getEvent,
+  listEventClans,
   deleteEvent,
   setEventStatus,
   updateEventEndTime,
@@ -12,6 +14,25 @@ import {
   updateClan,
   regenerateClanPassword,
   elevateToDev,
+  createBracket,
+  listBrackets,
+  updateBracket,
+  deleteBracket,
+  createTile,
+  listTiles,
+  updateTile,
+  deleteTile,
+  createItem,
+  listItems,
+  updateItem,
+  deleteItem,
+  createItemSet,
+  listItemSets,
+  updateItemSet,
+  deleteItemSet,
+  addItemToSet,
+  removeItemFromSet,
+  listItemsInSet,
 } from "./admin.js";
 
 describe("createEvent", () => {
@@ -56,6 +77,40 @@ describe("listEvents", () => {
 
     expect(from).toHaveBeenCalledWith("events");
     expect(result).toEqual(events);
+  });
+});
+
+describe("getEvent", () => {
+  it("selects a single event by id", async () => {
+    const event = { id: "event-1", name: "Winter ToA Bingo", status: "published" };
+    const single = vi.fn().mockResolvedValue({ data: event, error: null });
+    const eq = vi.fn(() => ({ single }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await getEvent(fakeSupabase, "event-1");
+
+    expect(from).toHaveBeenCalledWith("events");
+    expect(eq).toHaveBeenCalledWith("id", "event-1");
+    expect(result).toEqual(event);
+  });
+});
+
+describe("listEventClans", () => {
+  it("calls list_clans for the given event and returns safe clan fields", async () => {
+    const clans = [
+      { clan_id: "clan-1", display_name: "Iron Foundry", is_shadow: false, shadow_score: null },
+    ];
+    const rpc = vi.fn().mockResolvedValue({ data: clans, error: null });
+    const fakeSupabase = { rpc };
+
+    const result = await listEventClans(fakeSupabase, "event-1");
+
+    expect(rpc).toHaveBeenCalledWith("list_clans", { p_event_id: "event-1" });
+    expect(result).toEqual([
+      { clanId: "clan-1", displayName: "Iron Foundry", isShadow: false, shadowScore: null },
+    ]);
   });
 });
 
@@ -203,6 +258,347 @@ describe("regenerateClanPassword", () => {
 
     expect(rpc).toHaveBeenCalledWith("regenerate_clan_password", { p_clan_id: "clan-1", p_role: "admin" });
     expect(password).toBe("NEWPASS1234");
+  });
+});
+
+describe("createBracket", () => {
+  it("inserts a point bracket on the given event and returns it", async () => {
+    const insertedRow = { id: "bracket-1", event_id: "event-1", label: "Hard", points: 20 };
+    const single = vi.fn().mockResolvedValue({ data: insertedRow, error: null });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    const from = vi.fn(() => ({ insert }));
+    const fakeSupabase = { from };
+
+    const bracket = await createBracket(fakeSupabase, "event-1", { label: "Hard", points: 20 });
+
+    expect(from).toHaveBeenCalledWith("point_brackets");
+    expect(insert).toHaveBeenCalledWith({ event_id: "event-1", label: "Hard", points: 20 });
+    expect(bracket).toEqual(insertedRow);
+  });
+});
+
+describe("listBrackets", () => {
+  it("selects all point brackets for the given event", async () => {
+    const brackets = [{ id: "bracket-1", event_id: "event-1", label: "Hard", points: 20 }];
+    const eq = vi.fn().mockResolvedValue({ data: brackets, error: null });
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listBrackets(fakeSupabase, "event-1");
+
+    expect(from).toHaveBeenCalledWith("point_brackets");
+    expect(eq).toHaveBeenCalledWith("event_id", "event-1");
+    expect(result).toEqual(brackets);
+  });
+});
+
+describe("updateBracket", () => {
+  it("updates the bracket's label and points", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateBracket(fakeSupabase, "bracket-1", { label: "Very Hard", points: 30 });
+
+    expect(from).toHaveBeenCalledWith("point_brackets");
+    expect(update).toHaveBeenCalledWith({ label: "Very Hard", points: 30 });
+    expect(eq).toHaveBeenCalledWith("id", "bracket-1");
+  });
+});
+
+describe("deleteBracket", () => {
+  it("deletes the bracket by id", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const del = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ delete: del }));
+    const fakeSupabase = { from };
+
+    await deleteBracket(fakeSupabase, "bracket-1");
+
+    expect(from).toHaveBeenCalledWith("point_brackets");
+    expect(del).toHaveBeenCalled();
+    expect(eq).toHaveBeenCalledWith("id", "bracket-1");
+  });
+});
+
+describe("createTile", () => {
+  it("inserts a tile on the given event and bracket, and returns it", async () => {
+    const insertedRow = {
+      id: "tile-1",
+      event_id: "event-1",
+      name: "Kill 5 Zulrahs",
+      bracket_id: "bracket-1",
+      tile_type: "complete_x_times",
+      config: { target: 5 },
+    };
+
+    const single = vi.fn().mockResolvedValue({ data: insertedRow, error: null });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    const from = vi.fn(() => ({ insert }));
+    const fakeSupabase = { from };
+
+    const tile = await createTile(fakeSupabase, "event-1", {
+      name: "Kill 5 Zulrahs",
+      bracketId: "bracket-1",
+      tileType: "complete_x_times",
+      config: { target: 5 },
+    });
+
+    expect(from).toHaveBeenCalledWith("tiles");
+    expect(insert).toHaveBeenCalledWith({
+      event_id: "event-1",
+      name: "Kill 5 Zulrahs",
+      bracket_id: "bracket-1",
+      tile_type: "complete_x_times",
+      config: { target: 5 },
+    });
+    expect(tile).toEqual(insertedRow);
+  });
+});
+
+describe("listTiles", () => {
+  it("selects all tiles for the given event, with each tile's bracket embedded", async () => {
+    const tiles = [
+      {
+        id: "tile-1",
+        event_id: "event-1",
+        name: "Kill 5 Zulrahs",
+        bracket_id: "bracket-1",
+        tile_type: "complete_x_times",
+        config: { target: 5 },
+        point_brackets: { id: "bracket-1", label: "Hard", points: 20 },
+      },
+    ];
+    const eq = vi.fn().mockResolvedValue({ data: tiles, error: null });
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listTiles(fakeSupabase, "event-1");
+
+    expect(from).toHaveBeenCalledWith("tiles");
+    expect(select).toHaveBeenCalledWith("*, point_brackets(*)");
+    expect(eq).toHaveBeenCalledWith("event_id", "event-1");
+    expect(result).toEqual(tiles);
+  });
+});
+
+describe("updateTile", () => {
+  it("updates the tile's name, bracket, type, and config", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateTile(fakeSupabase, "tile-1", {
+      name: "Kill 10 Zulrahs",
+      bracketId: "bracket-2",
+      tileType: "complete_x_times",
+      config: { target: 10 },
+    });
+
+    expect(from).toHaveBeenCalledWith("tiles");
+    expect(update).toHaveBeenCalledWith({
+      name: "Kill 10 Zulrahs",
+      bracket_id: "bracket-2",
+      tile_type: "complete_x_times",
+      config: { target: 10 },
+    });
+    expect(eq).toHaveBeenCalledWith("id", "tile-1");
+  });
+});
+
+describe("deleteTile", () => {
+  it("deletes the tile by id", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const del = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ delete: del }));
+    const fakeSupabase = { from };
+
+    await deleteTile(fakeSupabase, "tile-1");
+
+    expect(from).toHaveBeenCalledWith("tiles");
+    expect(del).toHaveBeenCalled();
+    expect(eq).toHaveBeenCalledWith("id", "tile-1");
+  });
+});
+
+describe("createItem", () => {
+  it("inserts an item and returns it", async () => {
+    const insertedRow = { id: "item-1", name: "Zulrah's scales", photo_url: "https://example.com/scales.png" };
+    const single = vi.fn().mockResolvedValue({ data: insertedRow, error: null });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    const from = vi.fn(() => ({ insert }));
+    const fakeSupabase = { from };
+
+    const item = await createItem(fakeSupabase, { name: "Zulrah's scales", photoUrl: "https://example.com/scales.png" });
+
+    expect(from).toHaveBeenCalledWith("items");
+    expect(insert).toHaveBeenCalledWith({ name: "Zulrah's scales", photo_url: "https://example.com/scales.png" });
+    expect(item).toEqual(insertedRow);
+  });
+});
+
+describe("listItems", () => {
+  it("selects all items", async () => {
+    const items = [{ id: "item-1", name: "Zulrah's scales", photo_url: null }];
+    const select = vi.fn().mockResolvedValue({ data: items, error: null });
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listItems(fakeSupabase);
+
+    expect(from).toHaveBeenCalledWith("items");
+    expect(result).toEqual(items);
+  });
+});
+
+describe("deleteItem", () => {
+  it("deletes the item by id", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const del = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ delete: del }));
+    const fakeSupabase = { from };
+
+    await deleteItem(fakeSupabase, "item-1");
+
+    expect(from).toHaveBeenCalledWith("items");
+    expect(del).toHaveBeenCalled();
+    expect(eq).toHaveBeenCalledWith("id", "item-1");
+  });
+});
+
+describe("updateItem", () => {
+  it("updates the item's name and photo url", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateItem(fakeSupabase, "item-1", { name: "Zulrah's scales (x1000)", photoUrl: "https://example.com/scales2.png" });
+
+    expect(from).toHaveBeenCalledWith("items");
+    expect(update).toHaveBeenCalledWith({ name: "Zulrah's scales (x1000)", photo_url: "https://example.com/scales2.png" });
+    expect(eq).toHaveBeenCalledWith("id", "item-1");
+  });
+});
+
+describe("createItemSet", () => {
+  it("inserts an item set and returns it", async () => {
+    const insertedRow = { id: "set-1", name: "Barrows sets" };
+    const single = vi.fn().mockResolvedValue({ data: insertedRow, error: null });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    const from = vi.fn(() => ({ insert }));
+    const fakeSupabase = { from };
+
+    const itemSet = await createItemSet(fakeSupabase, { name: "Barrows sets" });
+
+    expect(from).toHaveBeenCalledWith("item_sets");
+    expect(insert).toHaveBeenCalledWith({ name: "Barrows sets" });
+    expect(itemSet).toEqual(insertedRow);
+  });
+});
+
+describe("listItemSets", () => {
+  it("selects all item sets", async () => {
+    const itemSets = [{ id: "set-1", name: "Barrows sets" }];
+    const select = vi.fn().mockResolvedValue({ data: itemSets, error: null });
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listItemSets(fakeSupabase);
+
+    expect(from).toHaveBeenCalledWith("item_sets");
+    expect(result).toEqual(itemSets);
+  });
+});
+
+describe("updateItemSet", () => {
+  it("updates the item set's name", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateItemSet(fakeSupabase, "set-1", { name: "Barrows sets (updated)" });
+
+    expect(from).toHaveBeenCalledWith("item_sets");
+    expect(update).toHaveBeenCalledWith({ name: "Barrows sets (updated)" });
+    expect(eq).toHaveBeenCalledWith("id", "set-1");
+  });
+});
+
+describe("deleteItemSet", () => {
+  it("deletes the item set by id", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const del = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ delete: del }));
+    const fakeSupabase = { from };
+
+    await deleteItemSet(fakeSupabase, "set-1");
+
+    expect(from).toHaveBeenCalledWith("item_sets");
+    expect(del).toHaveBeenCalled();
+    expect(eq).toHaveBeenCalledWith("id", "set-1");
+  });
+});
+
+describe("addItemToSet", () => {
+  it("inserts a row linking the item to the set", async () => {
+    const insert = vi.fn().mockResolvedValue({ data: null, error: null });
+    const from = vi.fn(() => ({ insert }));
+    const fakeSupabase = { from };
+
+    await addItemToSet(fakeSupabase, "set-1", "item-1");
+
+    expect(from).toHaveBeenCalledWith("item_set_members");
+    expect(insert).toHaveBeenCalledWith({ item_set_id: "set-1", item_id: "item-1" });
+  });
+});
+
+describe("removeItemFromSet", () => {
+  it("deletes the row linking the item to the set", async () => {
+    const eq2 = vi.fn().mockResolvedValue({ data: null, error: null });
+    const eq1 = vi.fn(() => ({ eq: eq2 }));
+    const del = vi.fn(() => ({ eq: eq1 }));
+    const from = vi.fn(() => ({ delete: del }));
+    const fakeSupabase = { from };
+
+    await removeItemFromSet(fakeSupabase, "set-1", "item-1");
+
+    expect(from).toHaveBeenCalledWith("item_set_members");
+    expect(del).toHaveBeenCalled();
+    expect(eq1).toHaveBeenCalledWith("item_set_id", "set-1");
+    expect(eq2).toHaveBeenCalledWith("item_id", "item-1");
+  });
+});
+
+describe("listItemsInSet", () => {
+  it("selects the items belonging to the given set, unwrapping the join", async () => {
+    const rows = [
+      { items: { id: "item-1", name: "Zulrah's scales", photo_url: null } },
+      { items: { id: "item-2", name: "Tanzanite fang", photo_url: null } },
+    ];
+    const eq = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listItemsInSet(fakeSupabase, "set-1");
+
+    expect(from).toHaveBeenCalledWith("item_set_members");
+    expect(select).toHaveBeenCalledWith("items(*)");
+    expect(eq).toHaveBeenCalledWith("item_set_id", "set-1");
+    expect(result).toEqual([
+      { id: "item-1", name: "Zulrah's scales", photo_url: null },
+      { id: "item-2", name: "Tanzanite fang", photo_url: null },
+    ]);
   });
 });
 
