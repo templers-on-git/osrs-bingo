@@ -1,5 +1,15 @@
 import { describe, it, expect, vi } from "vitest";
-import { createEvent, listEvents, createClan, assignClanToEvent, listClans, elevateToDev } from "./admin.js";
+import {
+  createEvent,
+  listEvents,
+  deleteEvent,
+  createClan,
+  assignClanToEvent,
+  listClans,
+  deleteClan,
+  regenerateClanPassword,
+  elevateToDev,
+} from "./admin.js";
 
 describe("createEvent", () => {
   it("inserts a draft event and returns it", async () => {
@@ -107,6 +117,44 @@ describe("listClans", () => {
       { clanId: "clan-1", displayName: "Iron Foundry", prefix: "IF", eventId: "event-1" },
       { clanId: "clan-2", displayName: "Rune Reapers", prefix: "RR", eventId: null },
     ]);
+  });
+});
+
+describe("deleteEvent", () => {
+  it("deletes the event by id", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const del = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ delete: del }));
+    const fakeSupabase = { from };
+
+    await deleteEvent(fakeSupabase, "event-1");
+
+    expect(from).toHaveBeenCalledWith("events");
+    expect(del).toHaveBeenCalled();
+    expect(eq).toHaveBeenCalledWith("id", "event-1");
+  });
+});
+
+describe("deleteClan", () => {
+  it("calls delete_clan with the clan id", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: null });
+    const fakeSupabase = { rpc };
+
+    await deleteClan(fakeSupabase, "clan-1");
+
+    expect(rpc).toHaveBeenCalledWith("delete_clan", { p_clan_id: "clan-1" });
+  });
+});
+
+describe("regenerateClanPassword", () => {
+  it("calls regenerate_clan_password and returns the new plaintext password", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: "NEWPASS1234", error: null });
+    const fakeSupabase = { rpc };
+
+    const password = await regenerateClanPassword(fakeSupabase, "clan-1", "admin");
+
+    expect(rpc).toHaveBeenCalledWith("regenerate_clan_password", { p_clan_id: "clan-1", p_role: "admin" });
+    expect(password).toBe("NEWPASS1234");
   });
 });
 

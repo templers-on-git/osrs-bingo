@@ -15,6 +15,11 @@ export async function listEvents(supabase) {
   return data;
 }
 
+export async function deleteEvent(supabase, eventId) {
+  const { error } = await supabase.from("events").delete().eq("id", eventId);
+  if (error) throw error;
+}
+
 export async function createClan(supabase, { displayName, prefix }) {
   const { data, error } = await supabase
     .rpc("create_clan", { p_display_name: displayName, p_prefix: prefix })
@@ -42,6 +47,17 @@ export async function listClans(supabase) {
     prefix: c.prefix,
     eventId: c.event_id,
   }));
+}
+
+export async function deleteClan(supabase, clanId) {
+  const { error } = await supabase.rpc("delete_clan", { p_clan_id: clanId });
+  if (error) throw error;
+}
+
+export async function regenerateClanPassword(supabase, clanId, role) {
+  const { data, error } = await supabase.rpc("regenerate_clan_password", { p_clan_id: clanId, p_role: role });
+  if (error) throw error;
+  return data;
 }
 
 export async function elevateToDev(supabase, password) {

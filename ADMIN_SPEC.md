@@ -64,4 +64,10 @@ Three independent ways an event ends:
 - Business rules (tile-completion logic, event-end consensus, permission checks) live in plain testable functions in front of the database — keeps TDD practice close to ordinary JS rather than starting testing practice on SQL/RLS policies.
 - The custom password-per-role-per-clan login (see Auth) will be a small Supabase Edge Function rather than Supabase's built-in email/password auth, since the built-in flow assumes individual accounts.
 
-Status: not yet set up — Liel has never done backend work before; next step is walking through Supabase account/project creation, then schema design.
+Status (as of 2026-07-15): Supabase project set up, schema + RLS live, Dev master-password login and a Dev dashboard built (create clan, create event, assign/unassign clan to event). See `supabase/` for the SQL/Edge Functions and `dev.html`/`dev.js` for the dashboard.
+
+## Known gaps / not built yet
+
+- **Editing a clan's name/prefix after creation** — no update function or UI exists yet, on either the Dev or (future) Admin side. Per the Auth section above, renaming is meant to be an Admin action on their own clan, not a Dev action, but neither is built. Flagged during Dev-dashboard work on 2026-07-15 — Liel explicitly wants this picked up later, not forgotten.
+- Board building (tiles UI) — not started at all.
+- Player/Admin-side login page and views — the `login` Edge Function exists and works, but there's no frontend for it yet (only the Dev side has a page).

@@ -30,7 +30,35 @@
       </div>
     </header>
     <main>
-      <p>Dev dashboard — event/clan management coming next.</p>
+      <div id="new-clan-passwords" class="dev-callout hidden"></div>
+
+      <section class="dev-section">
+        <h2>Create Clan</h2>
+        <div class="dev-form">
+          <input id="clan-name-input" placeholder="Clan name" autocomplete="off">
+          <input id="clan-prefix-input" placeholder="Prefix (optional)" autocomplete="off" maxlength="6">
+          <button id="create-clan-btn">Create Clan</button>
+        </div>
+      </section>
+
+      <section class="dev-section">
+        <h2>Create Event</h2>
+        <div class="dev-form">
+          <input id="event-name-input" placeholder="Event name" autocomplete="off">
+          <input id="event-end-input" type="datetime-local">
+          <button id="create-event-btn">Create Event</button>
+        </div>
+      </section>
+
+      <section class="dev-section">
+        <h2>Unassigned Clans</h2>
+        <ul id="unassigned-clans-list" class="dev-list"></ul>
+      </section>
+
+      <section class="dev-section">
+        <h2>Events</h2>
+        <div id="events-list"></div>
+      </section>
     </main>
   </div>
 

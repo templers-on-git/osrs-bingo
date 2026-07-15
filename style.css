@@ -173,6 +173,101 @@ main {
   margin: 0 auto;
 }
 
+/* ── Dev Dashboard ── */
+.dev-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px 24px;
+  margin-bottom: 20px;
+}
+
+.dev-section h2 {
+  font-size: 16px;
+  color: var(--gold);
+  margin-bottom: 14px;
+}
+
+.dev-form {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.dev-form input, .dev-form select {
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.dev-form button {
+  padding: 10px 16px;
+  background: var(--gold);
+  color: #0f1117;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dev-form button:hover { background: var(--gold-light); }
+
+.dev-list { list-style: none; }
+
+.dev-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.dev-list li:last-child { border-bottom: none; }
+
+.dev-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+
+.dev-empty { color: var(--text-muted); font-style: italic; }
+
+.dev-muted { color: var(--text-muted); font-size: 13px; margin-bottom: 12px; }
+
+.dev-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.dev-event-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+
+.dev-event-card h3 { color: var(--text); margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
+
+.dev-callout {
+  background: var(--claimed-bg);
+  border: 1px solid var(--claimed-border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.dev-callout code {
+  background: var(--surface2);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
 /* ── Tile Groups ── */
 .tile-group { margin-bottom: 44px; }
 

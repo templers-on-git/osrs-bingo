@@ -21,9 +21,12 @@ create table if not exists events (
 -- event_id is nullable: a clan is created on its own (Dev-only) and then
 -- assigned to exactly one event afterward via assign_clan_to_event(). It's
 -- still only ever in one event at a time, just not atomically with creation.
+-- on delete set null (not cascade): deleting an event unassigns its clans
+-- rather than deleting them — a clan's identity/passwords survive event
+-- deletion, since those were handed out to real people.
 create table if not exists clans (
   id uuid primary key default gen_random_uuid(),
-  event_id uuid references events(id) on delete cascade,
+  event_id uuid references events(id) on delete set null,
   display_name text not null,
   prefix text,
   admin_password_hash text not null,
@@ -32,6 +35,14 @@ create table if not exists clans (
   shadow_score int, -- only used when is_shadow = true
   created_at timestamptz not null default now()
 );
+
+-- `create table if not exists` above won't retroactively change an
+-- already-existing FK's ON DELETE behavior (e.g. the live project's, from
+-- before this was set-null instead of cascade) — this does that part,
+-- idempotently. clans_event_id_fkey is Postgres's default name for a
+-- single-column inline FK on clans.event_id.
+alter table clans drop constraint if exists clans_event_id_fkey;
+alter table clans add constraint clans_event_id_fkey foreign key (event_id) references events(id) on delete set null;
 
 -- `create table if not exists` above won't retroactively alter an
 -- already-existing clans table (e.g. the live project's, from before
@@ -186,8 +197,30 @@ as $$
   where current_is_dev();
 $$;
 
+-- Permanently deletes a clan (and its passwords). Dev-only, same reasoning
+-- as create_clan above. Events are deleted via a plain table delete instead
+-- (see events_dev_write in rls.sql) since events aren't locked out at the
+-- grant level the way clans are.
+create or replace function delete_clan(p_clan_id uuid)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  if not current_is_dev() then
+    raise exception 'dev only';
+  end if;
+
+  delete from clans where id = p_clan_id;
+end;
+$$;
+
 -- Regenerates a single clan's password for one role, invalidating the old one.
 -- Use this for "lost password" instead of ever clearing/resetting tables.
+-- Dev-only, same reasoning as create_clan above — this one had NO check at
+-- all until now, meaning any anonymous session could silently invalidate
+-- and learn any clan's password. Found while wiring this into the Dev
+-- dashboard, fixed immediately.
 create or replace function regenerate_clan_password(p_clan_id uuid, p_role text)
 returns text
 language plpgsql
@@ -196,6 +229,10 @@ as $$
 declare
   v_password text := generate_clan_password();
 begin
+  if not current_is_dev() then
+    raise exception 'dev only';
+  end if;
+
   if p_role = 'admin' then
     update clans set admin_password_hash = crypt(v_password, gen_salt('bf')) where id = p_clan_id;
   elsif p_role = 'player' then
