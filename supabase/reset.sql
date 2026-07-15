@@ -11,6 +11,7 @@ drop table if exists item_set_members cascade;
 drop table if exists item_sets cascade;
 drop table if exists items cascade;
 drop table if exists tiles cascade;
+drop table if exists point_brackets cascade;
 drop table if exists clans cascade;
 drop table if exists events cascade;
 

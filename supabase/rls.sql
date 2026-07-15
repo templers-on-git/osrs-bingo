@@ -80,6 +80,20 @@ create policy clans_select on clans for select using (
 
 create policy clans_dev_write on clans for all using (current_is_dev()) with check (current_is_dev());
 
+-- ── point_brackets (same access shape as tiles — shared board metadata) ──────
+
+alter table point_brackets enable row level security;
+
+create policy point_brackets_select on point_brackets for select using (
+  current_is_dev() or point_brackets.event_id = current_event_id()
+);
+
+create policy point_brackets_write on point_brackets for all using (
+  current_is_dev() or (current_role_claim() = 'admin' and point_brackets.event_id = current_event_id())
+) with check (
+  current_is_dev() or (current_role_claim() = 'admin' and point_brackets.event_id = current_event_id())
+);
+
 -- ── tiles (board is dev-authored, everyone in the event can read it) ─────────
 
 alter table tiles enable row level security;
@@ -173,6 +187,8 @@ $$;
 
 -- ── cross-clan totals, safely, without exposing per-clan tile detail ────────
 
+-- Points now come from the tile's bracket (tiles.points was dropped —
+-- points live only on point_brackets, see schema.sql), hence the extra join.
 create or replace function clan_totals(p_event_id uuid)
 returns table (clan_id uuid, display_name text, total_points bigint)
 language sql
@@ -180,10 +196,11 @@ security definer
 stable
 as $$
   select c.id, c.display_name,
-    coalesce(sum(case when tp.completed then t.points else 0 end), 0)
+    coalesce(sum(case when tp.completed then pb.points else 0 end), 0)
   from clans c
   left join tile_progress tp on tp.clan_id = c.id
   left join tiles t on t.id = tp.tile_id
+  left join point_brackets pb on pb.id = t.bracket_id
   where c.event_id = p_event_id
   group by c.id, c.display_name;
 $$;

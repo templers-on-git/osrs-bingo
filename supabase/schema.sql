@@ -76,11 +76,22 @@ create table if not exists item_set_members (
   primary key (item_set_id, item_id)
 );
 
+-- A tile's points live only on its bracket (not on the tile itself) — one
+-- shared, admin-defined set of point tiers per event (e.g. "Easy" = 5pts,
+-- "Hard" = 20pts), so changing a bracket's point value updates every tile
+-- in it at once instead of drifting out of sync per-tile.
+create table if not exists point_brackets (
+  id uuid primary key default gen_random_uuid(),
+  event_id uuid not null references events(id) on delete cascade,
+  label text not null,
+  points int not null
+);
+
 create table if not exists tiles (
   id uuid primary key default gen_random_uuid(),
   event_id uuid not null references events(id) on delete cascade,
   name text not null,
-  points int not null,
+  bracket_id uuid not null references point_brackets(id) on delete restrict,
   tile_type text not null check (
     tile_type in ('complete_once', 'complete_x_times', 'collect_one_of_each', 'collect_k_of_y', 'n_sets')
   ),
@@ -186,15 +197,24 @@ $$;
 -- list_clans below, which is scoped to one event and safe for non-Dev
 -- roles). Used by the Dev dashboard to show unassigned clans available to
 -- add to an event.
+--
+-- plpgsql (not sql) deliberately: a `language sql` function body is
+-- validated eagerly at CREATE time, so referencing current_is_dev() (only
+-- defined later, in rls.sql) would fail on a true from-scratch run right
+-- after reset.sql — plpgsql defers name resolution to first call instead,
+-- same as create_clan/assign_clan_to_event below.
 create or replace function list_dev_clans()
 returns table (clan_id uuid, display_name text, prefix text, event_id uuid)
-language sql
+language plpgsql
 security definer
 stable
 as $$
-  select c.id, c.display_name, c.prefix, c.event_id
-  from clans c
-  where current_is_dev();
+begin
+  return query
+    select c.id, c.display_name, c.prefix, c.event_id
+    from clans c
+    where current_is_dev();
+end;
 $$;
 
 -- Permanently deletes a clan (and its passwords). Dev-only, same reasoning

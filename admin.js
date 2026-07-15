@@ -79,10 +79,10 @@ export async function regenerateClanPassword(supabase, clanId, role) {
   return data;
 }
 
-export async function createTile(supabase, eventId, { name, points, tileType, config }) {
+export async function createBracket(supabase, eventId, { label, points }) {
   const { data, error } = await supabase
-    .from("tiles")
-    .insert({ event_id: eventId, name, points, tile_type: tileType, config })
+    .from("point_brackets")
+    .insert({ event_id: eventId, label, points })
     .select()
     .single();
 
@@ -90,16 +90,45 @@ export async function createTile(supabase, eventId, { name, points, tileType, co
   return data;
 }
 
-export async function listTiles(supabase, eventId) {
-  const { data, error } = await supabase.from("tiles").select().eq("event_id", eventId);
+export async function listBrackets(supabase, eventId) {
+  const { data, error } = await supabase.from("point_brackets").select().eq("event_id", eventId);
   if (error) throw error;
   return data;
 }
 
-export async function updateTile(supabase, tileId, { name, points, tileType, config }) {
+export async function updateBracket(supabase, bracketId, { label, points }) {
+  const { error } = await supabase.from("point_brackets").update({ label, points }).eq("id", bracketId);
+  if (error) throw error;
+}
+
+export async function deleteBracket(supabase, bracketId) {
+  const { error } = await supabase.from("point_brackets").delete().eq("id", bracketId);
+  if (error) throw error;
+}
+
+export async function createTile(supabase, eventId, { name, bracketId, tileType, config }) {
+  const { data, error } = await supabase
+    .from("tiles")
+    .insert({ event_id: eventId, name, bracket_id: bracketId, tile_type: tileType, config })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+}
+
+// Embeds each tile's bracket (point value + label) in one query rather than
+// a separate lookup — points now live only on the bracket, not the tile.
+export async function listTiles(supabase, eventId) {
+  const { data, error } = await supabase.from("tiles").select("*, point_brackets(*)").eq("event_id", eventId);
+  if (error) throw error;
+  return data;
+}
+
+export async function updateTile(supabase, tileId, { name, bracketId, tileType, config }) {
   const { error } = await supabase
     .from("tiles")
-    .update({ name, points, tile_type: tileType, config })
+    .update({ name, bracket_id: bracketId, tile_type: tileType, config })
     .eq("id", tileId);
 
   if (error) throw error;

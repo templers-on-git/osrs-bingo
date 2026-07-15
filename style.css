@@ -327,6 +327,32 @@ main {
 .pts-3 { background: #b8961a; color: #0f1117; }
 .pts-2 { background: #2980b9; color: #fff; }
 .pts-1 { background: #555570; color: #fff; }
+.pts-badge.generic { background: var(--gold); color: #0f1117; }
+
+.btn-ghost.active { border-color: var(--gold); color: var(--gold); }
+
+/* ── Inline tile editing (Edit pane) ── */
+.tile-card.editing { border-color: var(--gold); }
+
+.tile-edit-form { flex-direction: column; align-items: stretch; }
+.tile-edit-form input, .tile-edit-form select { margin-bottom: 0; }
+
+/* ── Progress bar (replaces the old points pill inside each tile card) ── */
+.progress-bar {
+  height: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: var(--gold);
+  transition: width 0.2s;
+}
+
+.tile-card.complete .progress-bar-fill { background: var(--complete-text); }
 
 /* ── Tile Grid ── */
 .tile-grid {

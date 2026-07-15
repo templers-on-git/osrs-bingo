@@ -12,6 +12,10 @@ import {
   updateClan,
   regenerateClanPassword,
   elevateToDev,
+  createBracket,
+  listBrackets,
+  updateBracket,
+  deleteBracket,
   createTile,
   listTiles,
   updateTile,
@@ -218,13 +222,76 @@ describe("regenerateClanPassword", () => {
   });
 });
 
+describe("createBracket", () => {
+  it("inserts a point bracket on the given event and returns it", async () => {
+    const insertedRow = { id: "bracket-1", event_id: "event-1", label: "Hard", points: 20 };
+    const single = vi.fn().mockResolvedValue({ data: insertedRow, error: null });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    const from = vi.fn(() => ({ insert }));
+    const fakeSupabase = { from };
+
+    const bracket = await createBracket(fakeSupabase, "event-1", { label: "Hard", points: 20 });
+
+    expect(from).toHaveBeenCalledWith("point_brackets");
+    expect(insert).toHaveBeenCalledWith({ event_id: "event-1", label: "Hard", points: 20 });
+    expect(bracket).toEqual(insertedRow);
+  });
+});
+
+describe("listBrackets", () => {
+  it("selects all point brackets for the given event", async () => {
+    const brackets = [{ id: "bracket-1", event_id: "event-1", label: "Hard", points: 20 }];
+    const eq = vi.fn().mockResolvedValue({ data: brackets, error: null });
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listBrackets(fakeSupabase, "event-1");
+
+    expect(from).toHaveBeenCalledWith("point_brackets");
+    expect(eq).toHaveBeenCalledWith("event_id", "event-1");
+    expect(result).toEqual(brackets);
+  });
+});
+
+describe("updateBracket", () => {
+  it("updates the bracket's label and points", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateBracket(fakeSupabase, "bracket-1", { label: "Very Hard", points: 30 });
+
+    expect(from).toHaveBeenCalledWith("point_brackets");
+    expect(update).toHaveBeenCalledWith({ label: "Very Hard", points: 30 });
+    expect(eq).toHaveBeenCalledWith("id", "bracket-1");
+  });
+});
+
+describe("deleteBracket", () => {
+  it("deletes the bracket by id", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const del = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ delete: del }));
+    const fakeSupabase = { from };
+
+    await deleteBracket(fakeSupabase, "bracket-1");
+
+    expect(from).toHaveBeenCalledWith("point_brackets");
+    expect(del).toHaveBeenCalled();
+    expect(eq).toHaveBeenCalledWith("id", "bracket-1");
+  });
+});
+
 describe("createTile", () => {
-  it("inserts a tile on the given event and returns it", async () => {
+  it("inserts a tile on the given event and bracket, and returns it", async () => {
     const insertedRow = {
       id: "tile-1",
       event_id: "event-1",
       name: "Kill 5 Zulrahs",
-      points: 10,
+      bracket_id: "bracket-1",
       tile_type: "complete_x_times",
       config: { target: 5 },
     };
@@ -237,7 +304,7 @@ describe("createTile", () => {
 
     const tile = await createTile(fakeSupabase, "event-1", {
       name: "Kill 5 Zulrahs",
-      points: 10,
+      bracketId: "bracket-1",
       tileType: "complete_x_times",
       config: { target: 5 },
     });
@@ -246,7 +313,7 @@ describe("createTile", () => {
     expect(insert).toHaveBeenCalledWith({
       event_id: "event-1",
       name: "Kill 5 Zulrahs",
-      points: 10,
+      bracket_id: "bracket-1",
       tile_type: "complete_x_times",
       config: { target: 5 },
     });
@@ -255,9 +322,17 @@ describe("createTile", () => {
 });
 
 describe("listTiles", () => {
-  it("selects all tiles for the given event", async () => {
+  it("selects all tiles for the given event, with each tile's bracket embedded", async () => {
     const tiles = [
-      { id: "tile-1", event_id: "event-1", name: "Kill 5 Zulrahs", points: 10, tile_type: "complete_x_times", config: { target: 5 } },
+      {
+        id: "tile-1",
+        event_id: "event-1",
+        name: "Kill 5 Zulrahs",
+        bracket_id: "bracket-1",
+        tile_type: "complete_x_times",
+        config: { target: 5 },
+        point_brackets: { id: "bracket-1", label: "Hard", points: 20 },
+      },
     ];
     const eq = vi.fn().mockResolvedValue({ data: tiles, error: null });
     const select = vi.fn(() => ({ eq }));
@@ -267,13 +342,14 @@ describe("listTiles", () => {
     const result = await listTiles(fakeSupabase, "event-1");
 
     expect(from).toHaveBeenCalledWith("tiles");
+    expect(select).toHaveBeenCalledWith("*, point_brackets(*)");
     expect(eq).toHaveBeenCalledWith("event_id", "event-1");
     expect(result).toEqual(tiles);
   });
 });
 
 describe("updateTile", () => {
-  it("updates the tile's name, points, type, and config", async () => {
+  it("updates the tile's name, bracket, type, and config", async () => {
     const eq = vi.fn().mockResolvedValue({ data: null, error: null });
     const update = vi.fn(() => ({ eq }));
     const from = vi.fn(() => ({ update }));
@@ -281,7 +357,7 @@ describe("updateTile", () => {
 
     await updateTile(fakeSupabase, "tile-1", {
       name: "Kill 10 Zulrahs",
-      points: 15,
+      bracketId: "bracket-2",
       tileType: "complete_x_times",
       config: { target: 10 },
     });
@@ -289,7 +365,7 @@ describe("updateTile", () => {
     expect(from).toHaveBeenCalledWith("tiles");
     expect(update).toHaveBeenCalledWith({
       name: "Kill 10 Zulrahs",
-      points: 15,
+      bracket_id: "bracket-2",
       tile_type: "complete_x_times",
       config: { target: 10 },
     });
