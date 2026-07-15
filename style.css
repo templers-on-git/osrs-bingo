@@ -354,6 +354,16 @@ main {
 
 .tile-card.complete .progress-bar-fill { background: var(--complete-text); }
 
+/* ── Item bank (Dev dashboard) ── */
+.item-thumb {
+  width: 20px;
+  height: 20px;
+  object-fit: cover;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
 /* ── Tile Grid ── */
 .tile-grid {
   display: grid;

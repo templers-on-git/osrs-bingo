@@ -151,6 +151,11 @@ export async function listItems(supabase) {
   return data;
 }
 
+export async function updateItem(supabase, itemId, { name, photoUrl }) {
+  const { error } = await supabase.from("items").update({ name, photo_url: photoUrl }).eq("id", itemId);
+  if (error) throw error;
+}
+
 export async function deleteItem(supabase, itemId) {
   const { error } = await supabase.from("items").delete().eq("id", itemId);
   if (error) throw error;
@@ -166,6 +171,11 @@ export async function listItemSets(supabase) {
   const { data, error } = await supabase.from("item_sets").select();
   if (error) throw error;
   return data;
+}
+
+export async function updateItemSet(supabase, itemSetId, { name }) {
+  const { error } = await supabase.from("item_sets").update({ name }).eq("id", itemSetId);
+  if (error) throw error;
 }
 
 export async function deleteItemSet(supabase, itemSetId) {
@@ -186,6 +196,12 @@ export async function removeItemFromSet(supabase, itemSetId, itemId) {
     .eq("item_id", itemId);
 
   if (error) throw error;
+}
+
+export async function listItemsInSet(supabase, itemSetId) {
+  const { data, error } = await supabase.from("item_set_members").select("items(*)").eq("item_set_id", itemSetId);
+  if (error) throw error;
+  return data.map((row) => row.items);
 }
 
 export async function elevateToDev(supabase, password) {

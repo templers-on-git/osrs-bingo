@@ -22,12 +22,15 @@ import {
   deleteTile,
   createItem,
   listItems,
+  updateItem,
   deleteItem,
   createItemSet,
   listItemSets,
+  updateItemSet,
   deleteItemSet,
   addItemToSet,
   removeItemFromSet,
+  listItemsInSet,
 } from "./admin.js";
 
 describe("createEvent", () => {
@@ -434,6 +437,21 @@ describe("deleteItem", () => {
   });
 });
 
+describe("updateItem", () => {
+  it("updates the item's name and photo url", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateItem(fakeSupabase, "item-1", { name: "Zulrah's scales (x1000)", photoUrl: "https://example.com/scales2.png" });
+
+    expect(from).toHaveBeenCalledWith("items");
+    expect(update).toHaveBeenCalledWith({ name: "Zulrah's scales (x1000)", photo_url: "https://example.com/scales2.png" });
+    expect(eq).toHaveBeenCalledWith("id", "item-1");
+  });
+});
+
 describe("createItemSet", () => {
   it("inserts an item set and returns it", async () => {
     const insertedRow = { id: "set-1", name: "Barrows sets" };
@@ -462,6 +480,21 @@ describe("listItemSets", () => {
 
     expect(from).toHaveBeenCalledWith("item_sets");
     expect(result).toEqual(itemSets);
+  });
+});
+
+describe("updateItemSet", () => {
+  it("updates the item set's name", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateItemSet(fakeSupabase, "set-1", { name: "Barrows sets (updated)" });
+
+    expect(from).toHaveBeenCalledWith("item_sets");
+    expect(update).toHaveBeenCalledWith({ name: "Barrows sets (updated)" });
+    expect(eq).toHaveBeenCalledWith("id", "set-1");
   });
 });
 
@@ -507,6 +540,29 @@ describe("removeItemFromSet", () => {
     expect(del).toHaveBeenCalled();
     expect(eq1).toHaveBeenCalledWith("item_set_id", "set-1");
     expect(eq2).toHaveBeenCalledWith("item_id", "item-1");
+  });
+});
+
+describe("listItemsInSet", () => {
+  it("selects the items belonging to the given set, unwrapping the join", async () => {
+    const rows = [
+      { items: { id: "item-1", name: "Zulrah's scales", photo_url: null } },
+      { items: { id: "item-2", name: "Tanzanite fang", photo_url: null } },
+    ];
+    const eq = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listItemsInSet(fakeSupabase, "set-1");
+
+    expect(from).toHaveBeenCalledWith("item_set_members");
+    expect(select).toHaveBeenCalledWith("items(*)");
+    expect(eq).toHaveBeenCalledWith("item_set_id", "set-1");
+    expect(result).toEqual([
+      { id: "item-1", name: "Zulrah's scales", photo_url: null },
+      { id: "item-2", name: "Tanzanite fang", photo_url: null },
+    ]);
   });
 });
 

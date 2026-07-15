@@ -12,6 +12,17 @@ import {
   deleteClan,
   updateClan,
   regenerateClanPassword,
+  createItem,
+  listItems,
+  updateItem,
+  deleteItem,
+  createItemSet,
+  listItemSets,
+  updateItemSet,
+  deleteItemSet,
+  addItemToSet,
+  removeItemFromSet,
+  listItemsInSet,
 } from "./admin.js";
 
 const SUPABASE_URL = "https://swqaheqhglqtolzbtgfe.supabase.co";
@@ -36,9 +47,26 @@ const createEventBtn = document.getElementById("create-event-btn");
 const unassignedClansList = document.getElementById("unassigned-clans-list");
 const eventsList = document.getElementById("events-list");
 
+const itemNameInput = document.getElementById("item-name-input");
+const itemPhotoInput = document.getElementById("item-photo-input");
+const createItemBtn = document.getElementById("create-item-btn");
+const itemsList = document.getElementById("items-list");
+const itemSetNameInput = document.getElementById("item-set-name-input");
+const createItemSetBtn = document.getElementById("create-item-set-btn");
+const itemSetsList = document.getElementById("item-sets-list");
+
 let events = [];
 let clans = [];
+let items = [];
+let itemSets = [];
+let itemsBySetId = {}; // set id -> array of item rows currently in that set
+let editingItemId = null;
+let editingItemSetId = null;
 const editingEndTimeFor = new Set(); // event ids currently showing the end-time editor
+
+function escapeAttr(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
 function showDashboard() {
   loginScreen.classList.add("hidden");
@@ -83,8 +111,18 @@ async function handleLogout() {
 }
 
 async function loadDashboard() {
-  [events, clans] = await Promise.all([listEvents(supabase), listClans(supabase)]);
+  [events, clans, items, itemSets] = await Promise.all([
+    listEvents(supabase),
+    listClans(supabase),
+    listItems(supabase),
+    listItemSets(supabase),
+  ]);
+  const memberLists = await Promise.all(itemSets.map((s) => listItemsInSet(supabase, s.id)));
+  itemsBySetId = Object.fromEntries(itemSets.map((s, i) => [s.id, memberLists[i]]));
+
   renderDashboard();
+  renderItems();
+  renderItemSets();
 }
 
 // datetime-local inputs need "YYYY-MM-DDTHH:mm" in the browser's local time
@@ -159,6 +197,205 @@ function renderDashboard() {
           </div>` : ""}
       </div>`;
   }).join("");
+}
+
+function itemRowHtml(item) {
+  if (item.id === editingItemId) return itemFormHtml(item);
+
+  return `
+    <li>
+      <span>${item.photo_url ? `<img src="${escapeAttr(item.photo_url)}" alt="" class="item-thumb">` : ""}${escapeAttr(item.name)}</span>
+      <span class="dev-row-actions">
+        <button class="btn-ghost" data-edit-item="${item.id}">Edit</button>
+        <button class="btn-ghost" data-delete-item="${item.id}">Delete</button>
+      </span>
+    </li>`;
+}
+
+function itemFormHtml(item) {
+  return `
+    <li>
+      <span class="dev-form">
+        <input class="item-edit-name" value="${escapeAttr(item.name)}" placeholder="Item name">
+        <input class="item-edit-photo" value="${escapeAttr(item.photo_url ?? "")}" placeholder="Photo URL">
+        <button class="btn-ghost" data-save-item="${item.id}">Save</button>
+        <button class="btn-ghost" data-cancel-edit-item="${item.id}">Cancel</button>
+      </span>
+    </li>`;
+}
+
+function renderItems() {
+  itemsList.innerHTML = items.length ? items.map(itemRowHtml).join("") : "<li class=\"dev-empty\">No items yet</li>";
+}
+
+function itemSetCardHtml(set) {
+  if (set.id === editingItemSetId) return itemSetFormHtml(set);
+
+  const members = itemsBySetId[set.id] || [];
+  const availableToAdd = items.filter((i) => !members.some((m) => m.id === i.id));
+
+  return `
+    <div class="dev-event-card">
+      <h3>
+        ${escapeAttr(set.name)}
+        <button class="btn-ghost" data-edit-item-set="${set.id}">Rename</button>
+        <button class="btn-ghost" data-delete-item-set="${set.id}">Delete</button>
+      </h3>
+      <ul class="dev-list">
+        ${members.length
+          ? members.map((m) => `
+            <li>
+              <span>${escapeAttr(m.name)}</span>
+              <button class="btn-ghost" data-remove-member="${m.id}" data-set-id="${set.id}">Remove</button>
+            </li>`).join("")
+          : "<li class=\"dev-empty\">No items yet</li>"}
+      </ul>
+      ${availableToAdd.length ? `
+        <div class="dev-form">
+          <select data-add-member-select="${set.id}">
+            ${availableToAdd.map((i) => `<option value="${i.id}">${escapeAttr(i.name)}</option>`).join("")}
+          </select>
+          <button class="btn-ghost" data-add-member-btn="${set.id}">Add to set</button>
+        </div>` : ""}
+    </div>`;
+}
+
+function itemSetFormHtml(set) {
+  return `
+    <div class="dev-event-card">
+      <div class="dev-form">
+        <input class="item-set-edit-name" value="${escapeAttr(set.name)}" placeholder="Set name">
+        <button class="btn-ghost" data-save-item-set="${set.id}">Save</button>
+        <button class="btn-ghost" data-cancel-edit-item-set="${set.id}">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function renderItemSets() {
+  itemSetsList.innerHTML = itemSets.length
+    ? itemSets.map(itemSetCardHtml).join("")
+    : "<p class=\"dev-empty\">No item sets yet.</p>";
+}
+
+async function handleCreateItem() {
+  const name = itemNameInput.value.trim();
+  const photoUrl = itemPhotoInput.value.trim() || null;
+  if (!name) return;
+
+  createItemBtn.disabled = true;
+  try {
+    await createItem(supabase, { name, photoUrl });
+    itemNameInput.value = "";
+    itemPhotoInput.value = "";
+    await loadDashboard();
+  } finally {
+    createItemBtn.disabled = false;
+  }
+}
+
+async function handleItemsListClick(e) {
+  const deleteItemId = e.target.dataset.deleteItem;
+  if (deleteItemId) {
+    if (confirm("Delete this item? It will be removed from any sets it belongs to.")) {
+      await deleteItem(supabase, deleteItemId);
+      await loadDashboard();
+    }
+    return;
+  }
+
+  const editItemId = e.target.dataset.editItem;
+  if (editItemId) {
+    editingItemId = editItemId;
+    renderItems();
+    return;
+  }
+
+  const cancelItemId = e.target.dataset.cancelEditItem;
+  if (cancelItemId) {
+    editingItemId = null;
+    renderItems();
+    return;
+  }
+
+  const saveItemId = e.target.dataset.saveItem;
+  if (saveItemId) {
+    const row = e.target.closest("li");
+    const name = row.querySelector(".item-edit-name").value.trim();
+    const photoUrl = row.querySelector(".item-edit-photo").value.trim() || null;
+    if (!name) return;
+
+    await updateItem(supabase, saveItemId, { name, photoUrl });
+    editingItemId = null;
+    await loadDashboard();
+  }
+}
+
+async function handleCreateItemSet() {
+  const name = itemSetNameInput.value.trim();
+  if (!name) return;
+
+  createItemSetBtn.disabled = true;
+  try {
+    await createItemSet(supabase, { name });
+    itemSetNameInput.value = "";
+    await loadDashboard();
+  } finally {
+    createItemSetBtn.disabled = false;
+  }
+}
+
+async function handleItemSetsListClick(e) {
+  const deleteSetId = e.target.dataset.deleteItemSet;
+  if (deleteSetId) {
+    if (confirm("Delete this item set? Any tiles referencing it will need to be updated separately.")) {
+      await deleteItemSet(supabase, deleteSetId);
+      await loadDashboard();
+    }
+    return;
+  }
+
+  const editSetId = e.target.dataset.editItemSet;
+  if (editSetId) {
+    editingItemSetId = editSetId;
+    renderItemSets();
+    return;
+  }
+
+  const cancelSetId = e.target.dataset.cancelEditItemSet;
+  if (cancelSetId) {
+    editingItemSetId = null;
+    renderItemSets();
+    return;
+  }
+
+  const saveSetId = e.target.dataset.saveItemSet;
+  if (saveSetId) {
+    const card = e.target.closest(".dev-event-card");
+    const name = card.querySelector(".item-set-edit-name").value.trim();
+    if (!name) return;
+
+    await updateItemSet(supabase, saveSetId, { name });
+    editingItemSetId = null;
+    await loadDashboard();
+    return;
+  }
+
+  const removeMemberItemId = e.target.dataset.removeMember;
+  if (removeMemberItemId) {
+    const setId = e.target.dataset.setId;
+    await removeItemFromSet(supabase, setId, removeMemberItemId);
+    await loadDashboard();
+    return;
+  }
+
+  const addMemberSetId = e.target.dataset.addMemberBtn;
+  if (addMemberSetId) {
+    const select = itemSetsList.querySelector(`select[data-add-member-select="${addMemberSetId}"]`);
+    if (select?.value) {
+      await addItemToSet(supabase, addMemberSetId, select.value);
+      await loadDashboard();
+    }
+  }
 }
 
 async function handleCreateClan() {
@@ -303,6 +540,10 @@ eventsList.addEventListener("click", async (e) => {
 
 createClanBtn.addEventListener("click", handleCreateClan);
 createEventBtn.addEventListener("click", handleCreateEvent);
+createItemBtn.addEventListener("click", handleCreateItem);
+itemsList.addEventListener("click", handleItemsListClick);
+createItemSetBtn.addEventListener("click", handleCreateItemSet);
+itemSetsList.addEventListener("click", handleItemSetsListClick);
 
 async function init() {
   const { data: { session } } = await supabase.auth.getSession();
