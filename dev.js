@@ -38,6 +38,7 @@ const eventsList = document.getElementById("events-list");
 
 let events = [];
 let clans = [];
+const editingEndTimeFor = new Set(); // event ids currently showing the end-time editor
 
 function showDashboard() {
   loginScreen.classList.add("hidden");
@@ -139,8 +140,12 @@ function renderDashboard() {
         </h3>
         <p class="dev-muted">
           Ends: ${new Date(event.end_time_utc).toLocaleString()}
-          <input type="datetime-local" data-end-input="${event.id}" value="${toDatetimeLocalValue(event.end_time_utc)}">
-          <button class="btn-ghost" data-save-end="${event.id}">Save end time</button>
+          ${editingEndTimeFor.has(event.id) ? `
+            <input type="datetime-local" data-end-input="${event.id}" value="${toDatetimeLocalValue(event.end_time_utc)}">
+            <button class="btn-ghost" data-save-end="${event.id}">Save</button>
+          ` : `
+            <button class="btn-ghost" data-edit-end="${event.id}">Change end time</button>
+          `}
         </p>
         <ul class="dev-list">
           ${assigned.length
@@ -265,11 +270,19 @@ eventsList.addEventListener("click", async (e) => {
     return;
   }
 
+  const editEndEventId = e.target.dataset.editEnd;
+  if (editEndEventId) {
+    editingEndTimeFor.add(editEndEventId);
+    renderDashboard();
+    return;
+  }
+
   const saveEndEventId = e.target.dataset.saveEnd;
   if (saveEndEventId) {
     const input = eventsList.querySelector(`input[data-end-input="${saveEndEventId}"]`);
     if (input?.value) {
       await updateEventEndTime(supabase, saveEndEventId, new Date(input.value).toISOString());
+      editingEndTimeFor.delete(saveEndEventId);
       await loadDashboard();
     }
     return;
