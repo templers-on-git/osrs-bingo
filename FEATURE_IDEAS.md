@@ -2,6 +2,11 @@
 
 Discussion/backlog only — none of this is implemented yet.
 
+## Next up (start here)
+
+1. **Player tile sign-up** — Players can broadcast "I'm working on this tile" to their clan, no gating/proof required (per `ADMIN_SPEC.md`'s Player role). Ephemeral/presence-style, distinct from `tile_progress` (which tracks actual completion, not who's attempting it) — no player names are ever attached to progress/completion per the Privacy section, so sign-up needs its own separate, non-persistent-to-progress mechanism.
+2. **Dev cross-clan Admin access** — on the Dev dashboard, for a given event, Dev should see all its clans and be able to act with that clan's Admin permissions (view/edit their board progress etc.) to help troubleshoot when something isn't working for a clan, without needing that clan's actual Admin password. RLS already lets Dev bypass everything (`current_is_dev()` is OR'd into every write policy), so this is a UI gap, not a backend one — needs a way for Dev to pick "act as clan X" and have `login.html`'s screens use that chosen clan instead of deriving `clanId`/`eventId` purely from the Dev's own session `app_metadata` (which has no `clan_id` when acting as pure Dev).
+
 ## Confirmed direction
 
 1. **Admin / player split** — ✅ done. Full design in `ADMIN_SPEC.md`; View/Edit/Progress tabs live in `login.html`.
