@@ -1,12 +1,11 @@
 # osrs-bingo v2 — feature backlog
 
-Discussion/backlog only — none of this is implemented yet.
+Discussion/backlog only — none of this is implemented yet. See `BUGS_AND_CHANGES.md` for bug reports and small UI/behavior tweaks instead.
 
 ## Next up (start here)
 
-0. **Bug: clamp `complete_x_times` progress at 0** — the Progress tab's "-1" button can drive `currentCount` negative. Disabling the button client-side when `currentCount <= 0` isn't sufficient (a double-click race — two decrements both reading the same starting count before either write lands — can still push it below 0), since `incrementTileProgress` (`tileProgress.js`) itself has no floor. Fix belongs in that function: clamp the computed count to `Math.max(0, ...)` before saving, not just in the UI. Do this first, before anything else tomorrow.
 1. ~~Search when adding items to a set~~ — deferred (not skipped): `dev.js`'s "Add to set" control (Item Sets section) is still a plain flat `<select>` with no search, same gap the tile-creation picker in `login.html` already fixed (checkboxes + live search). Holding off because item-bank access/creation is likely to change shape once the equipment-slot-aware item bank and set-builder UI (see below) land — don't want to build search UI against the current flat-list access pattern twice.
-2. **Player tile sign-up** — Players can broadcast "I'm working on this tile" to their clan, no gating/proof required (per `ADMIN_SPEC.md`'s Player role). Ephemeral/presence-style, distinct from `tile_progress` (which tracks actual completion, not who's attempting it) — no player names are ever attached to progress/completion per the Privacy section, so sign-up needs its own separate, non-persistent-to-progress mechanism.
+2. **Player tile sign-up** — ✅ done. Players broadcast "I'm working on this tile" to their clan via `tile_signups` (`tileSignups.js`), separate from `tile_progress` per `ADMIN_SPEC.md`'s Privacy section. Keyed on `ign` (not the anonymous auth session id) so a player keeps control of their sign-ups across logout/login.
 3. **Hide/show completed tiles** — a board-level toggle to filter out already-completed tiles from view (View and/or Progress tab).
 4. **Clan progress summary at top of board** — total points collected so far, tiles done out of total tiles available, and an overall progress indicator that's point-based (not just tile-count-based, since tiles carry different point values via brackets).
 5. **Dev cross-clan Admin access** — on the Dev dashboard, for a given event, Dev should see all its clans and be able to act with that clan's Admin permissions (view/edit their board progress etc.) to help troubleshoot when something isn't working for a clan, without needing that clan's actual Admin password. RLS already lets Dev bypass everything (`current_is_dev()` is OR'd into every write policy), so this is a UI gap, not a backend one — needs a way for Dev to pick "act as clan X" and have `login.html`'s screens use that chosen clan instead of deriving `clanId`/`eventId` purely from the Dev's own session `app_metadata` (which has no `clan_id` when acting as pure Dev).
@@ -18,10 +17,6 @@ Discussion/backlog only — none of this is implemented yet.
 3. **Dark/light theme** toggle. Not built.
 4. **Mobile-friendly** layout (current app is desktop-oriented). Not built.
 5. **Results/summary tools** — exportable end-of-event summary, plus graphs/charts for a visual recap. Not built (`clan_totals()` RPC exists backend-side, no UI yet — see `ADMIN_SPEC.md` known gaps).
-
-## Deferred / uncertain (Progress tab item modal)
-
-- **Item chips reorder on every click, should be fixed and just toggle background color.** Root cause: `handleItemChipClick` (`login.js`) calls `loadBoard()` + re-runs `openItemModal()` after every collect/uncollect, which fully re-fetches (`listItemsInSet`/`buildItemsBySet` in `admin.js`, no `.order(...)` clause) and rebuilds the modal's HTML from scratch. Postgres doesn't guarantee row order without `ORDER BY`, so each re-fetch can come back in a different order. Liel's call: don't want a re-sort-every-time band-aid — the actual fix should stop rebuilding the whole item list on every click (just toggle the clicked chip's collected/confirmed class client-side, no re-fetch/re-render of the rest) so order is naturally stable because nothing else moves. Deferred until the tile/modal layout rework, since that's the natural point to redo this rendering approach anyway rather than patching the current one twice.
 
 ## Deferred / uncertain (item bank & set builder)
 

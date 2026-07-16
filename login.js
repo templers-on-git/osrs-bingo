@@ -23,6 +23,7 @@ import {
   unmarkTileComplete,
   incrementTileProgress,
 } from "./tileProgress.js";
+import { signUpForTile, dropTileSignUp, listClanTileSignups } from "./tileSignups.js";
 
 // The 3 tile types whose progress is tracked by collecting individual
 // items (directly, or via item sets for n_sets) rather than a plain counter.
@@ -86,11 +87,13 @@ const editTilesList = document.getElementById("edit-tiles-list");
 
 let currentClanId = null;
 let currentEventId = null;
+let currentIgn = null;
 let tiles = [];
 let brackets = [];
 let items = [];
 let itemSets = [];
 let progressByTileId = {};
+let signupsByTileId = {};
 let editingTileId = null; // tile currently showing its inline edit form, if any
 let editingBracketId = null; // bracket currently showing its inline edit form, if any
 
@@ -182,9 +185,14 @@ function configSummaryText(tile) {
 function showLoggedIn(ign, role) {
   loginScreen.classList.add("hidden");
   loggedInScreen.classList.remove("hidden");
+  currentIgn = ign;
   ignDisplay.textContent = ign;
   roleDisplay.textContent = role;
   adminTabs.classList.toggle("hidden", role !== "admin");
+}
+
+function signupsFor(tileId) {
+  return signupsByTileId[tileId] ?? [];
 }
 
 function progressFor(tileId) {
@@ -241,6 +249,22 @@ function groupTilesByBracket(tilesList) {
   return [...groups.values()].sort((a, b) => b.bracket.points - a.bracket.points);
 }
 
+function claimantsHtml(tileId) {
+  const igns = signupsFor(tileId);
+  if (!igns.length) return "";
+  return `
+    <div class="claimants">
+      ${igns.map((ign) => `<span class="claimant ${ign === currentIgn ? "me" : ""}">${escapeAttr(ign)}</span>`).join("")}
+    </div>`;
+}
+
+function signupButtonHtml(tileId) {
+  const signedUp = signupsFor(tileId).includes(currentIgn);
+  return signedUp
+    ? `<button class="btn-unclaim" data-drop-signup="${tileId}">Drop task</button>`
+    : `<button class="btn-claim" data-signup="${tileId}">Work on this</button>`;
+}
+
 function tileCardHtml(tile) {
   const progress = progressFor(tile.id);
   const progressText = progressInfoText(tile, progress);
@@ -252,14 +276,16 @@ function tileCardHtml(tile) {
     : "";
 
   return `
-    <div class="tile-card ${progress.completed ? "complete" : ""}">
+    <div class="tile-card ${progress.completed ? "complete" : signupsFor(tile.id).length ? "claimed" : ""}">
       <div class="tile-top">
         <span class="tile-task">${escapeAttr(tile.name)}</span>
         <span class="status-badge ${progress.completed ? "done" : "open"}">${progress.completed ? "Done" : "Open"}</span>
       </div>
       <div class="progress-bar"><div class="progress-bar-fill" style="width:${fillPct}%"></div></div>
       ${progressText ? `<span class="progress-info">${progressText}</span>` : ""}
+      ${claimantsHtml(tile.id)}
       ${viewItemsBtn}
+      ${!progress.completed ? signupButtonHtml(tile.id) : ""}
     </div>`;
 }
 
@@ -645,10 +671,11 @@ async function loadBoard() {
   currentClanId = clan_id;
   currentEventId = event_id;
 
-  const [tileRows, bracketRows, progressRows, event, eventClans, itemRows, itemSetRows] = await Promise.all([
+  const [tileRows, bracketRows, progressRows, signupRows, event, eventClans, itemRows, itemSetRows] = await Promise.all([
     listTiles(supabase, event_id),
     listBrackets(supabase, event_id),
     listClanTileProgress(supabase, clan_id),
+    listClanTileSignups(supabase, clan_id),
     getEvent(supabase, event_id),
     listEventClans(supabase, event_id),
     listItems(supabase),
@@ -659,6 +686,10 @@ async function loadBoard() {
   items = itemRows;
   itemSets = itemSetRows;
   progressByTileId = Object.fromEntries(progressRows.map((p) => [p.tileId, p]));
+  signupsByTileId = {};
+  for (const s of signupRows) {
+    (signupsByTileId[s.tileId] ??= []).push(s.ign);
+  }
 
   const ownClan = eventClans.find((c) => c.clanId === clan_id);
   eventClanDisplay.textContent = ownClan ? `${event.name} — ${ownClan.displayName}` : event.name;
@@ -942,9 +973,25 @@ editTilesList.addEventListener("click", handleEditTilesListClick);
 editTilesList.addEventListener("change", handleEditTilesListChange);
 editTilesList.addEventListener("input", handleChecklistSearch);
 
-boardGrid.addEventListener("click", (e) => {
-  const tileId = e.target.dataset.viewItems;
-  if (tileId) openItemModal(tileId, false);
+boardGrid.addEventListener("click", async (e) => {
+  const viewItemsTileId = e.target.dataset.viewItems;
+  if (viewItemsTileId) {
+    openItemModal(viewItemsTileId, false);
+    return;
+  }
+
+  const signupTileId = e.target.dataset.signup;
+  if (signupTileId) {
+    await signUpForTile(supabase, signupTileId, currentClanId, currentIgn);
+    await loadBoard();
+    return;
+  }
+
+  const dropSignupTileId = e.target.dataset.dropSignup;
+  if (dropSignupTileId) {
+    await dropTileSignUp(supabase, dropSignupTileId, currentClanId, currentIgn);
+    await loadBoard();
+  }
 });
 progressTilesList.addEventListener("click", handleProgressTilesListClick);
 itemModalBody.addEventListener("click", handleItemChipClick);
