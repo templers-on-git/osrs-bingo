@@ -61,7 +61,7 @@ export async function unmarkTileComplete(supabase, tileId, clanId) {
 
 export async function incrementTileProgress(supabase, tile, clanId, delta = 1) {
   const progress = await getTileProgress(supabase, tile.id, clanId);
-  const currentCount = progress.currentCount + delta;
+  const currentCount = Math.max(0, progress.currentCount + delta);
   const completed = isTileComplete(tile, { currentCount });
   const completedAt = completed ? new Date().toISOString() : null;
 

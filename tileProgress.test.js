@@ -326,6 +326,27 @@ describe("incrementTileProgress", () => {
     expect(progress.currentCount).toBe(5);
     expect(progress.completed).toBe(true);
   });
+
+  it("clamps current_count at 0 instead of going negative", async () => {
+    const existingRow = {
+      tile_id: "tile-1",
+      clan_id: "clan-1",
+      current_count: 0,
+      collected_item_ids: [],
+      completed: false,
+      completed_at: null,
+    };
+    const updatedRow = { ...existingRow, current_count: 0 };
+    const { fakeSupabase, upsert } = fakeReadThenWrite(existingRow, updatedRow);
+
+    const progress = await incrementTileProgress(fakeSupabase, tile, "clan-1", -1);
+
+    expect(upsert).toHaveBeenCalledWith(
+      { tile_id: "tile-1", clan_id: "clan-1", current_count: 0, completed: false, completed_at: null },
+      { onConflict: "tile_id,clan_id" },
+    );
+    expect(progress.currentCount).toBe(0);
+  });
 });
 
 describe("collectItemForTile", () => {
