@@ -392,6 +392,11 @@ main {
   cursor: pointer;
 }
 
+.hide-completed-toggle {
+  margin-bottom: 14px;
+  color: var(--text-muted);
+}
+
 /* ── Two-column item/set picker (All vs Selected) ── */
 .picker-columns {
   display: flex;

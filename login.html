@@ -39,6 +39,10 @@
     <main>
       <!-- View: same rendering for Players and Admins -->
       <div id="view-pane">
+        <label class="checkbox-row hide-completed-toggle">
+          <input type="checkbox" id="view-hide-completed-toggle">
+          Hide completed tiles
+        </label>
         <div id="board-grid"></div>
       </div>
 
@@ -109,6 +113,10 @@
       <!-- Progress: Admin-only, separate from Edit so marking progress during
            a live event never risks a stray click on a tile-delete button -->
       <div id="progress-pane" class="hidden">
+        <label class="checkbox-row hide-completed-toggle">
+          <input type="checkbox" id="progress-hide-completed-toggle">
+          Hide completed tiles
+        </label>
         <div id="progress-tiles-list"></div>
       </div>
     </main>

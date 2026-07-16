@@ -54,6 +54,8 @@ const editPane = document.getElementById("edit-pane");
 const progressPane = document.getElementById("progress-pane");
 const boardGrid = document.getElementById("board-grid");
 const progressTilesList = document.getElementById("progress-tiles-list");
+const viewHideCompletedToggle = document.getElementById("view-hide-completed-toggle");
+const progressHideCompletedToggle = document.getElementById("progress-hide-completed-toggle");
 
 const itemModalOverlay = document.getElementById("item-modal-overlay");
 const itemModalTitle = document.getElementById("item-modal-title");
@@ -96,6 +98,8 @@ let progressByTileId = {};
 let signupsByTileId = {};
 let editingTileId = null; // tile currently showing its inline edit form, if any
 let editingBracketId = null; // bracket currently showing its inline edit form, if any
+let hideCompletedView = false; // independent per-pane, so a player can hide completed tiles on the board while an admin still sees them all on Progress
+let hideCompletedProgress = false;
 
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -300,11 +304,15 @@ function tileGroupHtml(group, cardHtmlFn) {
     </section>`;
 }
 
+function visibleTiles(hideCompleted) {
+  return hideCompleted ? tiles.filter((t) => !progressFor(t.id).completed) : tiles;
+}
+
 function renderBoard() {
-  const groups = groupTilesByBracket(tiles);
+  const groups = groupTilesByBracket(visibleTiles(hideCompletedView));
   boardGrid.innerHTML = groups.length
     ? groups.map((g) => tileGroupHtml(g, tileCardHtml)).join("")
-    : "<p class=\"dev-empty\">No tiles yet.</p>";
+    : "<p class=\"dev-empty\">No tiles to show.</p>";
 }
 
 // Same tile-card look as the View board, plus Edit/Delete — or, for the
@@ -444,10 +452,10 @@ function progressTileCardHtml(tile) {
 }
 
 function renderProgressTiles() {
-  const groups = groupTilesByBracket(tiles);
+  const groups = groupTilesByBracket(visibleTiles(hideCompletedProgress));
   progressTilesList.innerHTML = groups.length
     ? groups.map((g) => tileGroupHtml(g, progressTileCardHtml)).join("")
-    : "<p class=\"dev-empty\">No tiles yet.</p>";
+    : "<p class=\"dev-empty\">No tiles to show.</p>";
 }
 
 async function handleProgressTilesListClick(e) {
@@ -943,6 +951,15 @@ passwordInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") handleLogin();
 });
 logoutBtn.addEventListener("click", handleLogout);
+
+viewHideCompletedToggle.addEventListener("change", () => {
+  hideCompletedView = viewHideCompletedToggle.checked;
+  renderBoard();
+});
+progressHideCompletedToggle.addEventListener("change", () => {
+  hideCompletedProgress = progressHideCompletedToggle.checked;
+  renderProgressTiles();
+});
 
 viewTabBtn.addEventListener("click", () => setViewMode("view"));
 editTabBtn.addEventListener("click", () => setViewMode("edit"));
