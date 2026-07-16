@@ -101,6 +101,20 @@ create table if not exists tiles (
   config jsonb not null default '{}'
 );
 
+-- Ephemeral, player-attributed "I'm working on this" signal — deliberately
+-- separate from tile_progress (which stays anonymous, no player names, per
+-- ADMIN_SPEC.md's Privacy section). Keyed on ign (not the anonymous auth
+-- user id) so the same player can sign up/drop across different login
+-- sessions, since ign is what's stamped into app_metadata at login and
+-- stays stable across logout/login as long as they type the same name.
+create table if not exists tile_signups (
+  tile_id uuid not null references tiles(id) on delete cascade,
+  clan_id uuid not null references clans(id) on delete cascade,
+  ign text not null,
+  signed_up_at timestamptz not null default now(),
+  primary key (tile_id, clan_id, ign)
+);
+
 create table if not exists tile_progress (
   tile_id uuid not null references tiles(id) on delete cascade,
   clan_id uuid not null references clans(id) on delete cascade,

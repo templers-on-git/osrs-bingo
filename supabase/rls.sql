@@ -46,6 +46,17 @@ as $$
   select (auth.jwt() -> 'app_metadata' ->> 'event_id')::uuid
 $$;
 
+-- ign is stamped into app_metadata at login (see functions/login/index.ts) —
+-- used to scope tile_signups writes to "the name you logged in as", so a
+-- player keeps control of their own sign-ups across logout/login as long as
+-- they type the same ign, without needing a real per-player account.
+create or replace function current_ign()
+returns text
+language sql stable
+as $$
+  select auth.jwt() -> 'app_metadata' ->> 'ign'
+$$;
+
 -- ── Lock down the clans table entirely ──────────────────────────────────────
 -- Column-level revokes don't work here: Supabase's "automatically expose new
 -- tables" setting grants anon/authenticated table-level SELECT on clans, and
@@ -154,6 +165,21 @@ create policy tile_progress_admin_write on tile_progress for all using (
   current_role_claim() = 'admin' and clan_id = current_clan_id()
 ) with check (
   current_role_claim() = 'admin' and clan_id = current_clan_id()
+);
+
+-- ── tile_signups — visible to your own clan only; any logged-in player
+--    manages their own row (matched by ign, not role) ─────────────────────────
+
+alter table tile_signups enable row level security;
+
+create policy tile_signups_select on tile_signups for select using (
+  current_is_dev() or clan_id = current_clan_id()
+);
+
+create policy tile_signups_write on tile_signups for all using (
+  current_is_dev() or (clan_id = current_clan_id() and ign = current_ign())
+) with check (
+  current_is_dev() or (clan_id = current_clan_id() and ign = current_ign())
 );
 
 -- ── finish_early_votes ────────────────────────────────────────────────────────
