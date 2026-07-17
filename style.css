@@ -397,6 +397,37 @@ main {
   color: var(--text-muted);
 }
 
+.points-chart-svg {
+  width: 100%;
+  max-width: 600px;
+  height: auto;
+}
+
+.chart-point {
+  fill: var(--gold);
+  cursor: pointer;
+  transition: r 0.15s, fill 0.15s;
+}
+
+.chart-point:hover {
+  fill: var(--gold-light);
+  r: 6;
+}
+
+.leaderboard-me { font-weight: 700; color: var(--gold); }
+
+.analytics-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.analytics-row > .dev-section {
+  flex: 1;
+  min-width: 280px;
+}
+
 /* ── Two-column item/set picker (All vs Selected) ── */
 .picker-columns {
   display: flex;

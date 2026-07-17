@@ -14,7 +14,9 @@ import {
   listItems,
   listItemSets,
   listItemsInSet,
+  getClanLeaderboard,
 } from "./admin.js";
+import { computeBracketBreakdown, computePointsOverTime } from "./analytics.js";
 import {
   listClanTileProgress,
   collectItemForTile,
@@ -49,9 +51,15 @@ const adminTabs = document.getElementById("admin-tabs");
 const viewTabBtn = document.getElementById("view-tab-btn");
 const editTabBtn = document.getElementById("edit-tab-btn");
 const progressTabBtn = document.getElementById("progress-tab-btn");
+const analyticsTabBtn = document.getElementById("analytics-tab-btn");
 const viewPane = document.getElementById("view-pane");
 const editPane = document.getElementById("edit-pane");
 const progressPane = document.getElementById("progress-pane");
+const analyticsPane = document.getElementById("analytics-pane");
+const leaderboardList = document.getElementById("leaderboard-list");
+const breakdownList = document.getElementById("breakdown-list");
+const pointsChart = document.getElementById("points-chart");
+const pointsChartInfo = document.getElementById("points-chart-info");
 const boardGrid = document.getElementById("board-grid");
 const progressTilesList = document.getElementById("progress-tiles-list");
 const viewHideCompletedToggle = document.getElementById("view-hide-completed-toggle");
@@ -96,6 +104,11 @@ let items = [];
 let itemSets = [];
 let progressByTileId = {};
 let signupsByTileId = {};
+let leaderboard = [];
+let bracketBreakdown = [];
+let pointsOverTime = [];
+let currentEventStartTime = null;
+let currentEventEndTime = null;
 let editingTileId = null; // tile currently showing its inline edit form, if any
 let editingBracketId = null; // bracket currently showing its inline edit form, if any
 let hideCompletedView = false; // independent per-pane, so a player can hide completed tiles on the board while an admin still sees them all on Progress
@@ -458,6 +471,139 @@ function renderProgressTiles() {
     : "<p class=\"dev-empty\">No tiles to show.</p>";
 }
 
+// Leaderboard is cross-clan (totals only, via the guarded clan_totals() RPC)
+// — safe to show every clan's rank/points, just not their per-bracket detail.
+function leaderboardItemHtml(entry, rank) {
+  return `
+    <li class="${entry.clanId === currentClanId ? "leaderboard-me" : ""}">
+      <span>#${rank} ${escapeAttr(entry.displayName)}</span>
+      <span>${entry.totalPoints} pts</span>
+    </li>`;
+}
+
+function renderLeaderboard() {
+  leaderboardList.innerHTML = leaderboard.length
+    ? leaderboard.map((entry, i) => leaderboardItemHtml(entry, i + 1)).join("")
+    : "<li class=\"dev-empty\">No clans yet.</li>";
+}
+
+function breakdownItemHtml(group) {
+  const fillPct = group.totalCount ? Math.round((group.completedCount / group.totalCount) * 100) : 0;
+  return `
+    <li>
+      <span>${escapeAttr(group.label)} (${group.points} pts) — ${group.completedCount}/${group.totalCount}</span>
+      <div class="progress-bar"><div class="progress-bar-fill" style="width:${fillPct}%"></div></div>
+    </li>`;
+}
+
+function renderBreakdown() {
+  breakdownList.innerHTML = bracketBreakdown.length
+    ? bracketBreakdown.map(breakdownItemHtml).join("")
+    : "<li class=\"dev-empty\">No brackets yet.</li>";
+}
+
+// Rounds a raw per-tick step up to a "nice" number (1/2/5/10 x a power of
+// ten) so the y-axis reads e.g. 0/20/40/60 instead of 0/17/34/51.
+function niceStep(maxValue, targetTicks = 5) {
+  if (maxValue <= 0) return 1;
+  const rawStep = maxValue / targetTicks;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const residual = rawStep / magnitude;
+  const niceResidual = residual > 5 ? 10 : residual > 2 ? 5 : residual > 1 ? 2 : 1;
+  return niceResidual * magnitude;
+}
+
+function formatAxisTime(ms, spanMs) {
+  const d = new Date(ms);
+  return spanMs > 3 * 86400000
+    ? d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function formatPointTime(ms) {
+  return new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+// Hand-rolled SVG line chart -- no charting library, this project has no
+// build tooling. The x-axis always spans domainStartMs -> domainEndMs (the
+// event's start time -> now, capped at the event's end time) regardless of
+// where the actual data stops, so the chart visibly spreads out as time
+// passes rather than always stretching to fit whatever's been completed so
+// far. Each point's exact value/time shows on click (handleChartPointClick),
+// not hover -- hover just lights the dot up (see .chart-point:hover in
+// style.css) as a visual cue that it's clickable.
+function pointsChartSvg(series, domainStartMs, domainEndMs) {
+  if (series.length < 2) return "<p class=\"dev-empty\">No completions yet.</p>";
+
+  const width = 600;
+  const height = 260;
+  const padLeft = 46;
+  const padRight = 16;
+  const padTop = 20;
+  const padBottom = 40;
+  const plotWidth = width - padLeft - padRight;
+  const plotHeight = height - padTop - padBottom;
+
+  const timeSpan = domainEndMs - domainStartMs || 1;
+  const rawMax = Math.max(...series.map((p) => p.cumulativePoints), 1);
+  const yStep = niceStep(rawMax);
+  const yMax = Math.max(Math.ceil(rawMax / yStep) * yStep, yStep);
+
+  const x = (t) => padLeft + ((t - domainStartMs) / timeSpan) * plotWidth;
+  const y = (p) => padTop + plotHeight - (p / yMax) * plotHeight;
+
+  const yTickCount = Math.round(yMax / yStep);
+  const yTicks = Array.from({ length: yTickCount + 1 }, (_, i) => i * yStep);
+  const xTickCount = 5;
+  const xTicks = Array.from({ length: xTickCount + 1 }, (_, i) => domainStartMs + (timeSpan * i) / xTickCount);
+
+  const yGridlines = yTicks.map((v) => `
+    <line x1="${padLeft}" y1="${y(v)}" x2="${width - padRight}" y2="${y(v)}" style="stroke:var(--border);stroke-width:1"></line>
+    <text x="${padLeft - 8}" y="${y(v)}" text-anchor="end" dominant-baseline="middle" style="fill:var(--text-muted);font-size:11px">${v}</text>`).join("");
+
+  const xLabels = xTicks.map((t) => `
+    <text x="${x(t)}" y="${height - padBottom + 18}" text-anchor="middle" style="fill:var(--text-muted);font-size:11px">${escapeAttr(formatAxisTime(t, timeSpan))}</text>`).join("");
+
+  const coords = series.map((p) => {
+    const ms = new Date(p.time).getTime();
+    return [x(ms), y(p.cumulativePoints), p.cumulativePoints, ms];
+  });
+  const polylinePoints = coords.map(([cx, cy]) => `${cx},${cy}`).join(" ");
+  const circles = coords.map(([cx, cy, pts, ms]) => `
+    <circle class="chart-point" cx="${cx}" cy="${cy}" r="4" data-pts="${pts}" data-time="${escapeAttr(formatPointTime(ms))}"></circle>`).join("");
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" class="points-chart-svg">
+      <text x="${padLeft}" y="${padTop - 6}" style="fill:var(--text-muted);font-size:11px">Points</text>
+      <text x="${width - padRight}" y="${height - 2}" text-anchor="end" style="fill:var(--text-muted);font-size:11px">Time</text>
+      ${yGridlines}
+      <line x1="${padLeft}" y1="${padTop}" x2="${padLeft}" y2="${height - padBottom}" style="stroke:var(--border);stroke-width:1"></line>
+      <line x1="${padLeft}" y1="${height - padBottom}" x2="${width - padRight}" y2="${height - padBottom}" style="stroke:var(--border);stroke-width:1"></line>
+      ${xLabels}
+      <polyline points="${polylinePoints}" style="fill:none;stroke:var(--gold);stroke-width:2"></polyline>
+      ${circles}
+    </svg>`;
+}
+
+function renderPointsChart() {
+  const domainStartMs = new Date(currentEventStartTime).getTime();
+  const domainEndMs = Math.min(Date.now(), new Date(currentEventEndTime).getTime());
+  pointsChart.innerHTML = pointsChartSvg(pointsOverTime, domainStartMs, domainEndMs);
+  pointsChartInfo.textContent = "Click a point on the graph to see its exact points and time.";
+}
+
+function handleChartPointClick(e) {
+  const point = e.target.closest(".chart-point");
+  if (!point) return;
+  pointsChartInfo.textContent = `${point.dataset.pts} pts — ${point.dataset.time}`;
+}
+
+function renderAnalytics() {
+  renderLeaderboard();
+  renderBreakdown();
+  renderPointsChart();
+}
+
 async function handleProgressTilesListClick(e) {
   const viewItemsTileId = e.target.dataset.viewItems;
   if (viewItemsTileId) {
@@ -668,9 +814,11 @@ function setViewMode(mode) {
   viewPane.classList.toggle("hidden", mode !== "view");
   editPane.classList.toggle("hidden", mode !== "edit");
   progressPane.classList.toggle("hidden", mode !== "progress");
+  analyticsPane.classList.toggle("hidden", mode !== "analytics");
   viewTabBtn.classList.toggle("active", mode === "view");
   editTabBtn.classList.toggle("active", mode === "edit");
   progressTabBtn.classList.toggle("active", mode === "progress");
+  analyticsTabBtn.classList.toggle("active", mode === "analytics");
 }
 
 async function loadBoard() {
@@ -679,7 +827,7 @@ async function loadBoard() {
   currentClanId = clan_id;
   currentEventId = event_id;
 
-  const [tileRows, bracketRows, progressRows, signupRows, event, eventClans, itemRows, itemSetRows] = await Promise.all([
+  const [tileRows, bracketRows, progressRows, signupRows, event, eventClans, itemRows, itemSetRows, leaderboardRows] = await Promise.all([
     listTiles(supabase, event_id),
     listBrackets(supabase, event_id),
     listClanTileProgress(supabase, clan_id),
@@ -688,6 +836,7 @@ async function loadBoard() {
     listEventClans(supabase, event_id),
     listItems(supabase),
     listItemSets(supabase),
+    getClanLeaderboard(supabase, event_id),
   ]);
   tiles = tileRows;
   brackets = bracketRows;
@@ -698,6 +847,11 @@ async function loadBoard() {
   for (const s of signupRows) {
     (signupsByTileId[s.tileId] ??= []).push(s.ign);
   }
+  leaderboard = leaderboardRows;
+  bracketBreakdown = computeBracketBreakdown(tiles, progressByTileId);
+  currentEventStartTime = event.start_time_utc ?? event.created_at;
+  currentEventEndTime = event.end_time_utc;
+  pointsOverTime = computePointsOverTime(tiles, progressRows, currentEventStartTime);
 
   const ownClan = eventClans.find((c) => c.clanId === clan_id);
   eventClanDisplay.textContent = ownClan ? `${event.name} — ${ownClan.displayName}` : event.name;
@@ -707,6 +861,7 @@ async function loadBoard() {
   renderItemPickers();
   renderEditTiles();
   renderProgressTiles();
+  renderAnalytics();
 }
 
 function showLogin() {
@@ -964,6 +1119,8 @@ progressHideCompletedToggle.addEventListener("change", () => {
 viewTabBtn.addEventListener("click", () => setViewMode("view"));
 editTabBtn.addEventListener("click", () => setViewMode("edit"));
 progressTabBtn.addEventListener("click", () => setViewMode("progress"));
+analyticsTabBtn.addEventListener("click", () => setViewMode("analytics"));
+pointsChart.addEventListener("click", handleChartPointClick);
 tileTypeSelect.addEventListener("change", updateTileFormFieldsVisibility);
 tileItemsSearch.addEventListener("input", handleChecklistSearch);
 tileSetsSearch.addEventListener("input", handleChecklistSearch);

@@ -6,6 +6,7 @@ import {
   deleteEvent,
   setEventStatus,
   updateEventEndTime,
+  updateEventStartTime,
   createClan,
   assignClanToEvent,
   listClans,
@@ -63,6 +64,7 @@ let itemsBySetId = {}; // set id -> array of item rows currently in that set
 let editingItemId = null;
 let editingItemSetId = null;
 const editingEndTimeFor = new Set(); // event ids currently showing the end-time editor
+const editingStartTimeFor = new Set(); // event ids currently showing the start-time editor
 
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -176,6 +178,15 @@ function renderDashboard() {
           ${publishToggle}
           <button class="btn-ghost" data-delete-event="${event.id}">Delete event</button>
         </h3>
+        <p class="dev-muted">
+          Starts: ${new Date(event.start_time_utc ?? event.created_at).toLocaleString()}${event.start_time_utc ? "" : " (auto, when the event was created)"}
+          ${editingStartTimeFor.has(event.id) ? `
+            <input type="datetime-local" data-start-input="${event.id}" value="${toDatetimeLocalValue(event.start_time_utc ?? event.created_at)}">
+            <button class="btn-ghost" data-save-start="${event.id}">Save</button>
+          ` : `
+            <button class="btn-ghost" data-edit-start="${event.id}">${event.start_time_utc ? "Change start time" : "Set start time"}</button>
+          `}
+        </p>
         <p class="dev-muted">
           Ends: ${new Date(event.end_time_utc).toLocaleString()}
           ${editingEndTimeFor.has(event.id) ? `
@@ -504,6 +515,24 @@ eventsList.addEventListener("click", async (e) => {
   if (unpublishEventId) {
     await setEventStatus(supabase, unpublishEventId, "draft");
     await loadDashboard();
+    return;
+  }
+
+  const editStartEventId = e.target.dataset.editStart;
+  if (editStartEventId) {
+    editingStartTimeFor.add(editStartEventId);
+    renderDashboard();
+    return;
+  }
+
+  const saveStartEventId = e.target.dataset.saveStart;
+  if (saveStartEventId) {
+    const input = eventsList.querySelector(`input[data-start-input="${saveStartEventId}"]`);
+    if (input?.value) {
+      await updateEventStartTime(supabase, saveStartEventId, new Date(input.value).toISOString());
+      editingStartTimeFor.delete(saveStartEventId);
+      await loadDashboard();
+    }
     return;
   }
 
