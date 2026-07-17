@@ -215,6 +215,12 @@ $$;
 
 -- Points now come from the tile's bracket (tiles.points was dropped —
 -- points live only on point_brackets, see schema.sql), hence the extra join.
+--
+-- Had no permission guard until now — same gap as list_clans() was built
+-- with a guard for from the start: security definer bypasses RLS entirely,
+-- so without this check any caller could pass an arbitrary p_event_id and
+-- read cross-clan point totals for an event they have no session tied to.
+-- Found while building the Admin Analytics leaderboard (which calls this).
 create or replace function clan_totals(p_event_id uuid)
 returns table (clan_id uuid, display_name text, total_points bigint)
 language sql
@@ -228,5 +234,6 @@ as $$
   left join tiles t on t.id = tp.tile_id
   left join point_brackets pb on pb.id = t.bracket_id
   where c.event_id = p_event_id
+    and (current_is_dev() or p_event_id = current_event_id())
   group by c.id, c.display_name;
 $$;

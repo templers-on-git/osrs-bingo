@@ -14,9 +14,14 @@ create table if not exists events (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   status text not null default 'draft' check (status in ('draft', 'published', 'finished')),
+  start_time_utc timestamptz,
   end_time_utc timestamptz not null,
   created_at timestamptz not null default now()
 );
+
+-- `create table if not exists` above won't retroactively add this column to
+-- the live project's already-existing events table.
+alter table events add column if not exists start_time_utc timestamptz;
 
 -- event_id is nullable: a clan is created on its own (Dev-only) and then
 -- assigned to exactly one event afterward via assign_clan_to_event(). It's

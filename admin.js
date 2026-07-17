@@ -49,6 +49,21 @@ export async function updateEventEndTime(supabase, eventId, endTimeUtc) {
   if (error) throw error;
 }
 
+export async function updateEventStartTime(supabase, eventId, startTimeUtc) {
+  const { error } = await supabase.from("events").update({ start_time_utc: startTimeUtc }).eq("id", eventId);
+  if (error) throw error;
+}
+
+// Wraps the now-guarded clan_totals() RPC (see rls.sql) — ranks clans by
+// points descending so the UI doesn't have to re-sort.
+export async function getClanLeaderboard(supabase, eventId) {
+  const { data, error } = await supabase.rpc("clan_totals", { p_event_id: eventId });
+  if (error) throw error;
+  return data
+    .map((c) => ({ clanId: c.clan_id, displayName: c.display_name, totalPoints: c.total_points }))
+    .sort((a, b) => b.totalPoints - a.totalPoints);
+}
+
 export async function createClan(supabase, { displayName, prefix }) {
   const { data, error } = await supabase
     .rpc("create_clan", { p_display_name: displayName, p_prefix: prefix })

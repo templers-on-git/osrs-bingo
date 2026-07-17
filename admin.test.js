@@ -7,6 +7,8 @@ import {
   deleteEvent,
   setEventStatus,
   updateEventEndTime,
+  updateEventStartTime,
+  getClanLeaderboard,
   createClan,
   assignClanToEvent,
   listClans,
@@ -220,6 +222,40 @@ describe("updateEventEndTime", () => {
     expect(from).toHaveBeenCalledWith("events");
     expect(update).toHaveBeenCalledWith({ end_time_utc: "2026-09-01T00:00:00Z" });
     expect(eq).toHaveBeenCalledWith("id", "event-1");
+  });
+});
+
+describe("updateEventStartTime", () => {
+  it("updates the event's start_time_utc", async () => {
+    const eq = vi.fn().mockResolvedValue({ data: null, error: null });
+    const update = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ update }));
+    const fakeSupabase = { from };
+
+    await updateEventStartTime(fakeSupabase, "event-1", "2026-08-01T00:00:00Z");
+
+    expect(from).toHaveBeenCalledWith("events");
+    expect(update).toHaveBeenCalledWith({ start_time_utc: "2026-08-01T00:00:00Z" });
+    expect(eq).toHaveBeenCalledWith("id", "event-1");
+  });
+});
+
+describe("getClanLeaderboard", () => {
+  it("calls clan_totals and returns clans ranked by points descending, camelCased", async () => {
+    const rows = [
+      { clan_id: "clan-1", display_name: "Iron Foundry", total_points: 40 },
+      { clan_id: "clan-2", display_name: "Gold Rush", total_points: 65 },
+    ];
+    const rpc = vi.fn().mockResolvedValue({ data: rows, error: null });
+    const fakeSupabase = { rpc };
+
+    const result = await getClanLeaderboard(fakeSupabase, "event-1");
+
+    expect(rpc).toHaveBeenCalledWith("clan_totals", { p_event_id: "event-1" });
+    expect(result).toEqual([
+      { clanId: "clan-2", displayName: "Gold Rush", totalPoints: 65 },
+      { clanId: "clan-1", displayName: "Iron Foundry", totalPoints: 40 },
+    ]);
   });
 });
 
