@@ -11,11 +11,18 @@ import {
   listBrackets,
   updateBracket,
   deleteBracket,
-  listItems,
+  listItemsByIds,
   listItemSets,
   listItemsInSet,
+  createItemSet,
+  updateItemSet,
+  deleteItemSet,
+  addItemToSet,
+  removeItemFromSet,
   getClanLeaderboard,
 } from "./admin.js";
+import { loadWikiItemIndex, EQUIPMENT_SLOTS, groupBySlotBucket, slotBucketFor } from "./wikiItems.js";
+import { searchPickableItems, resolvePickedItem } from "./itemPicker.js";
 import { computeBracketBreakdown, computePointsOverTime } from "./analytics.js";
 import {
   listClanTileProgress,
@@ -46,6 +53,8 @@ const ignDisplay = document.getElementById("ign-display");
 const roleDisplay = document.getElementById("role-display");
 const logoutBtn = document.getElementById("logout-btn");
 const eventClanDisplay = document.getElementById("event-clan-display");
+const actingAsBanner = document.getElementById("acting-as-dev-banner");
+const actingAsClanName = document.getElementById("acting-as-clan-name");
 
 const adminTabs = document.getElementById("admin-tabs");
 const viewTabBtn = document.getElementById("view-tab-btn");
@@ -95,13 +104,44 @@ const createTileBtn = document.getElementById("create-tile-btn");
 const noBracketsNote = document.getElementById("no-brackets-note");
 const editTilesList = document.getElementById("edit-tiles-list");
 
+const itemSetsLockedNote = document.getElementById("item-sets-locked-note");
+const itemSetsCreateForm = document.getElementById("item-sets-create-form");
+const itemSetNameInput = document.getElementById("item-set-name-input");
+const createItemSetBtn = document.getElementById("create-item-set-btn");
+const itemSetsManagementList = document.getElementById("item-sets-management-list");
+
 let currentClanId = null;
 let currentEventId = null;
 let currentIgn = null;
+// Set only when a Dev opened this page via dev.html's "Act as Admin" link
+// (login.html?actAsClan=<id>&actAsEvent=<id>) — overrides the clan/event
+// that would otherwise come from the session's own app_metadata, which for
+// a pure Dev session has no clan_id/event_id at all. See loadBoard().
+let actingAsDevClanId = null;
+let actingAsDevEventId = null;
 let tiles = [];
 let brackets = [];
-let items = [];
+let resolvedItemsById = {}; // items.id -> row, populated for every item id referenced by a currently-loaded tile
 let itemSets = [];
+
+// Lazily loaded on first item-search interaction (a full pull of the OSRS
+// Wiki's item index — see wikiItems.js), then cached for the rest of the
+// session rather than reloaded per search.
+let wikiIndex = null;
+let wikiIndexLoading = null;
+
+// Add-Tile form's item picker: selected ids and the item search box's last
+// results (looked up by index when "Add" is clicked).
+let addTileSelectedItemIds = [];
+let addTileItemSearchResults = [];
+let addTileItemSearchDebounceTimer = null;
+
+// Inline tile-edit form's item picker — only one tile is ever in edit mode
+// at a time, so module-level state (not per-card) is enough, same as
+// editingTileId itself.
+let editSelectedItemIds = [];
+let editItemSearchResults = [];
+let editItemSearchDebounceTimer = null;
 let progressByTileId = {};
 let signupsByTileId = {};
 let leaderboard = [];
@@ -111,6 +151,11 @@ let currentEventStartTime = null;
 let currentEventEndTime = null;
 let editingTileId = null; // tile currently showing its inline edit form, if any
 let editingBracketId = null; // bracket currently showing its inline edit form, if any
+let itemsBySetId = {}; // set id -> array of item rows currently in that set (admin Item Sets section)
+let editingItemSetId = null; // item set currently showing its inline rename form, if any
+let itemSetSearchResultsBySetId = {}; // last search results per (set id, doll slot) - { [setId]: { [slot]: results } }
+let itemSetSearchDebounceTimer = null;
+let isEventLocked = false; // event has started -> item_sets management is Dev-only (RLS-enforced; this just drives the UI)
 let hideCompletedView = false; // independent per-pane, so a player can hide completed tiles on the board while an admin still sees them all on Progress
 let hideCompletedProgress = false;
 
@@ -133,12 +178,27 @@ function getCheckedValues(containerEl) {
   return [...containerEl.querySelectorAll("input[type=checkbox]:checked")].map((cb) => cb.value);
 }
 
-function itemCheckboxesHtml(selectedIds = []) {
-  return items.map((i) => `
-    <label class="checkbox-row">
-      <input type="checkbox" value="${i.id}" ${selectedIds.includes(i.id) ? "checked" : ""}>
-      ${escapeAttr(i.name)}
-    </label>`).join("");
+async function ensureWikiIndexLoaded() {
+  if (wikiIndex) return wikiIndex;
+  if (!wikiIndexLoading) wikiIndexLoading = loadWikiItemIndex(fetch);
+  wikiIndex = await wikiIndexLoading;
+  return wikiIndex;
+}
+
+// Live wiki-search results for the item picker (replaces the old
+// checkbox-per-item list — with ~16,500 wiki items, pre-rendering them all
+// as checkboxes isn't viable). Already-selected local items are filtered
+// out so a re-search doesn't offer to "Add" something already picked; a
+// wiki-source result has no local id yet, so it's always shown.
+function itemSearchResultsHtml(results, selectedIds) {
+  const visible = results.filter((r) => !(r.source === "local" && selectedIds.includes(r.id)));
+  if (!visible.length) return "<p class=\"dev-empty\">No matches</p>";
+  return visible.map((r, i) => `
+    <div class="checkbox-row">
+      ${r.photoUrl ? `<img src="${escapeAttr(r.photoUrl)}" class="item-thumb" alt="" referrerpolicy="no-referrer">` : ""}
+      <span>${escapeAttr(r.name)}${r.source === "wiki" ? " <em>(from wiki)</em>" : ""}</span>
+      <button class="btn-ghost" data-pick-item-index="${i}">Add</button>
+    </div>`).join("");
 }
 
 function setCheckboxesHtml(selectedIds = []) {
@@ -156,11 +216,11 @@ function setCheckboxesHtml(selectedIds = []) {
 function selectedItemsHtml(selectedIds) {
   if (!selectedIds.length) return "<p class=\"dev-empty\">None selected yet.</p>";
   return selectedIds.map((id) => {
-    const item = items.find((i) => i.id === id);
+    const item = resolvedItemsById[id];
     if (!item) return "";
     return `
       <div class="selected-chip">
-        ${item.photo_url ? `<img src="${escapeAttr(item.photo_url)}" class="item-thumb" alt="">` : ""}
+        ${item.photo_url ? `<img src="${escapeAttr(item.photo_url)}" class="item-thumb" alt="" referrerpolicy="no-referrer">` : ""}
         <span>${escapeAttr(item.name)}</span>
         <button class="selected-remove" data-remove-selected="${id}">&times;</button>
       </div>`;
@@ -361,7 +421,6 @@ function editTileFormHtml(tile) {
   const isCollectOne = type === "collect_one_of_each";
   const isCollectK = type === "collect_k_of_y";
   const isNSets = type === "n_sets";
-  const selectedItemIds = isCollectOne || isCollectK ? tile.config.itemIds : [];
   const selectedSetIds = isNSets ? tile.config.setIds : [];
   const mode = isNSets ? tile.config.mode : "one_of_each";
 
@@ -397,13 +456,13 @@ function editTileFormHtml(tile) {
       </div>
       <div class="tile-edit-items-picker picker-columns ${isCollectOne || isCollectK ? "" : "hidden"}">
         <div class="picker-column">
-          <p class="dev-muted">All Items</p>
-          <input type="text" class="checkbox-search tile-edit-items-search" placeholder="Search items...">
-          <div class="tile-edit-items checkbox-list">${itemCheckboxesHtml(selectedItemIds)}</div>
+          <p class="dev-muted">Search items to add</p>
+          <input type="text" class="checkbox-search item-wiki-search tile-edit-items-search" placeholder="Search the OSRS Wiki...">
+          <div class="tile-edit-items checkbox-list"></div>
         </div>
         <div class="picker-column">
-          <p class="dev-muted">Selected (<span class="tile-edit-items-count">${selectedItemIds.length}</span>)</p>
-          <div class="tile-edit-items-selected selected-list">${selectedItemsHtml(selectedItemIds)}</div>
+          <p class="dev-muted">Selected (<span class="tile-edit-items-count">${editSelectedItemIds.length}</span>)</p>
+          <div class="tile-edit-items-selected selected-list">${selectedItemsHtml(editSelectedItemIds)}</div>
         </div>
       </div>
       <div class="tile-edit-sets-picker picker-columns ${isNSets ? "" : "hidden"}">
@@ -425,6 +484,198 @@ function renderEditTiles() {
   editTilesList.innerHTML = groups.length
     ? groups.map((g) => tileGroupHtml(g, editTileCardHtml)).join("")
     : "<p class=\"dev-empty\">No tiles yet.</p>";
+}
+
+// Admin-owned item sets, per Liel's request: admins can build sets while
+// setting up (create/rename/delete, add/remove members via the same wiki
+// search as the tile picker), but that stops once their event has started
+// (isEventLocked, computed in loadBoard()) — only the Dev dashboard can
+// still touch sets after that. RLS is the real enforcement (see
+// item_sets_write/item_set_members_write in rls.sql); this only hides/
+// disables the controls so a locked admin isn't shown buttons that would
+// just fail server-side.
+// Same idea as itemSearchResultsHtml, but scoped to a specific set — unlike
+// the tile-edit form (only one ever open at a time), multiple item-set
+// cards can be on screen at once, so the "Add" button needs to say which
+// set it belongs to.
+function slotLabel(slot) {
+  return slot === "other" ? "Other (non-equipment)" : slot[0].toUpperCase() + slot.slice(1);
+}
+
+function itemSetSearchResultsHtml(results, existingMemberIds, setId, slot) {
+  const visible = results.filter((r) => !(r.source === "local" && existingMemberIds.includes(r.id)));
+  if (!visible.length) return "<p class=\"dev-empty\">No matches</p>";
+  return visible.map((r, i) => `
+    <div class="checkbox-row">
+      ${r.photoUrl ? `<img src="${escapeAttr(r.photoUrl)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
+      <span>${escapeAttr(r.name)}${r.equipmentSlot === "2h" ? " (2h)" : ""}${r.source === "wiki" ? " <em>(from wiki)</em>" : ""}</span>
+      <button class="btn-ghost" data-pick-result-index="${i}" data-pick-set-id="${escapeAttr(setId)}" data-pick-slot="${slot}">Add</button>
+    </div>`).join("");
+}
+
+// One equipment-doll cell — mirrors dev.js's dollSlotHtml, plus isEventLocked
+// gating (no search box or remove buttons once the admin's event has
+// started; see renderItemSetsManagement's note above).
+function dollSlotHtml(setId, slot, members, extraClass = "") {
+  return `
+    <div class="doll-slot ${extraClass}" data-slot="${slot}">
+      <p class="doll-slot-label">${slotLabel(slot)}</p>
+      <div class="doll-slot-members">
+        ${members.length
+          ? members.map((m) => `
+            <div class="selected-chip">
+              ${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
+              <span>${escapeAttr(m.name)}${m.equipment_slot === "2h" ? " (2h)" : ""}</span>
+              ${isEventLocked ? "" : `<button class="selected-remove" data-remove-member="${m.id}" data-set-id="${setId}">&times;</button>`}
+            </div>`).join("")
+          : "<p class=\"dev-empty\">Empty</p>"}
+      </div>
+      ${isEventLocked ? "" : `
+        <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${slot}" placeholder="Search ${slotLabel(slot).toLowerCase()}..." autocomplete="off">
+        <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${slot}"></div>`}
+    </div>`;
+}
+
+function itemSetManagementCardHtml(set) {
+  if (set.id === editingItemSetId) return itemSetManagementFormHtml(set);
+
+  const members = itemsBySetId[set.id] || [];
+  const grouped = groupBySlotBucket(members, (m) => m.equipment_slot);
+
+  return `
+    <div class="dev-event-card">
+      <h3>
+        ${escapeAttr(set.name)}
+        ${isEventLocked ? "" : `
+          <button class="btn-ghost" data-edit-item-set="${set.id}">Rename</button>
+          <button class="btn-ghost" data-delete-item-set="${set.id}">Delete</button>`}
+      </h3>
+      <div class="equipment-doll">
+        ${EQUIPMENT_SLOTS.map((slot) => dollSlotHtml(set.id, slot, grouped[slot])).join("")}
+      </div>
+      ${dollSlotHtml(set.id, "other", grouped.other, "doll-slot-other")}
+    </div>`;
+}
+
+function itemSetManagementFormHtml(set) {
+  return `
+    <div class="dev-event-card">
+      <div class="dev-form">
+        <input class="item-set-edit-name" value="${escapeAttr(set.name)}" placeholder="Set name">
+        <button class="btn-ghost" data-save-item-set="${set.id}">Save</button>
+        <button class="btn-ghost" data-cancel-edit-item-set="${set.id}">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function renderItemSetsManagement() {
+  itemSetsLockedNote.classList.toggle("hidden", !isEventLocked);
+  itemSetsCreateForm.classList.toggle("hidden", isEventLocked);
+  itemSetsManagementList.innerHTML = itemSets.length
+    ? itemSets.map(itemSetManagementCardHtml).join("")
+    : "<p class=\"dev-empty\">No item sets yet.</p>";
+}
+
+async function handleCreateItemSet() {
+  const name = itemSetNameInput.value.trim();
+  if (!name) return;
+
+  createItemSetBtn.disabled = true;
+  try {
+    await createItemSet(supabase, { name });
+    itemSetNameInput.value = "";
+    await loadBoard();
+  } finally {
+    createItemSetBtn.disabled = false;
+  }
+}
+
+// Debounced live wiki search for a set's add-member box — same approach as
+// handleTileItemsSearchInput, scoped to the specific set card searched in
+// (multiple set cards can exist at once, unlike the single tile-edit form).
+function handleItemSetSearchInput(e) {
+  if (!e.target.classList.contains("item-set-add-search")) return;
+  const setId = e.target.dataset.setId;
+  const slot = e.target.dataset.slot;
+  const query = e.target.value;
+
+  clearTimeout(itemSetSearchDebounceTimer);
+  itemSetSearchDebounceTimer = setTimeout(async () => {
+    const resultsEl = itemSetsManagementList.querySelector(`.item-set-add-results[data-set-id="${setId}"][data-slot="${slot}"]`);
+    if (!resultsEl) return;
+
+    (itemSetSearchResultsBySetId[setId] ??= {})[slot] = [];
+    if (!query.trim()) {
+      resultsEl.innerHTML = "";
+      return;
+    }
+
+    resultsEl.innerHTML = wikiIndex ? "" : "<p class=\"dev-empty\">Loading wiki item index…</p>";
+    await ensureWikiIndexLoaded();
+    if (itemSetsManagementList.querySelector(`.item-set-add-search[data-set-id="${setId}"][data-slot="${slot}"]`)?.value !== query) return;
+
+    const allResults = await searchPickableItems(supabase, wikiIndex, query);
+    const results = allResults.filter((r) => slotBucketFor(r.equipmentSlot) === slot);
+    itemSetSearchResultsBySetId[setId][slot] = results;
+    resultsEl.innerHTML = itemSetSearchResultsHtml(results, (itemsBySetId[setId] || []).map((m) => m.id), setId, slot);
+  }, 250);
+}
+
+async function handleItemSetsManagementListClick(e) {
+  const deleteSetId = e.target.dataset.deleteItemSet;
+  if (deleteSetId) {
+    if (confirm("Delete this item set? Any tiles referencing it will need to be updated separately.")) {
+      await deleteItemSet(supabase, deleteSetId);
+      await loadBoard();
+    }
+    return;
+  }
+
+  const editSetId = e.target.dataset.editItemSet;
+  if (editSetId) {
+    editingItemSetId = editSetId;
+    renderItemSetsManagement();
+    return;
+  }
+
+  const cancelSetId = e.target.dataset.cancelEditItemSet;
+  if (cancelSetId) {
+    editingItemSetId = null;
+    renderItemSetsManagement();
+    return;
+  }
+
+  const saveSetId = e.target.dataset.saveItemSet;
+  if (saveSetId) {
+    const card = e.target.closest(".dev-event-card");
+    const name = card.querySelector(".item-set-edit-name").value.trim();
+    if (!name) return;
+
+    await updateItemSet(supabase, saveSetId, { name });
+    editingItemSetId = null;
+    await loadBoard();
+    return;
+  }
+
+  const removeMemberItemId = e.target.dataset.removeMember;
+  if (removeMemberItemId) {
+    const setId = e.target.dataset.setId;
+    await removeItemFromSet(supabase, setId, removeMemberItemId);
+    await loadBoard();
+    return;
+  }
+
+  const pickSetId = e.target.dataset.pickSetId;
+  if (pickSetId) {
+    const slot = e.target.dataset.pickSlot;
+    const result = (itemSetSearchResultsBySetId[pickSetId]?.[slot] || [])[Number(e.target.dataset.pickResultIndex)];
+    if (!result) return;
+
+    e.target.disabled = true;
+    const item = await resolvePickedItem(supabase, result);
+    await addItemToSet(supabase, pickSetId, item.id);
+    await loadBoard();
+  }
 }
 
 // Progress tab: only the item/set-based tiles, each with a "View Items/Sets"
@@ -667,7 +918,7 @@ function itemChipHtml(item, progress, tileCompleted, interactive) {
   const stateClass = isCollected ? (tileCompleted ? "item-confirmed" : "item-collected") : "";
   return `
     <div class="item-chip ${stateClass} ${interactive ? "clickable" : ""}" ${interactive ? `data-toggle-item="${item.id}"` : ""}>
-      ${item.photo_url ? `<img src="${escapeAttr(item.photo_url)}" class="item-thumb" alt="">` : ""}
+      ${item.photo_url ? `<img src="${escapeAttr(item.photo_url)}" class="item-thumb" alt="" referrerpolicy="no-referrer">` : ""}
       <span>${escapeAttr(item.name)}</span>
     </div>`;
 }
@@ -693,7 +944,7 @@ async function openItemModal(tileId, interactive) {
         <div class="item-chip-grid">${members.map((m) => itemChipHtml(m, progress, progress.completed, interactive)).join("")}</div>
       </div>`).join("");
   } else {
-    const members = tile.config.itemIds.map((id) => items.find((i) => i.id === id)).filter(Boolean);
+    const members = tile.config.itemIds.map((id) => resolvedItemsById[id]).filter(Boolean);
     itemModalBody.innerHTML = `<div class="item-chip-grid">${members.map((m) => itemChipHtml(m, progress, progress.completed, interactive)).join("")}</div>`;
   }
 
@@ -768,16 +1019,52 @@ function renderBrackets() {
 // already selected across a loadBoard() refresh (e.g. after creating a
 // tile fails validation) rather than always resetting them.
 function renderItemPickers() {
-  tileItemsSelect.innerHTML = itemCheckboxesHtml(getCheckedValues(tileItemsSelect));
+  tileItemsSelect.innerHTML = itemSearchResultsHtml(addTileItemSearchResults, addTileSelectedItemIds);
   updateSelectedItemsPanel();
   tileSetsSelect.innerHTML = setCheckboxesHtml(getCheckedValues(tileSetsSelect));
   updateSelectedSetsPanel();
 }
 
 function updateSelectedItemsPanel() {
-  const selectedIds = getCheckedValues(tileItemsSelect);
-  tileItemsSelected.innerHTML = selectedItemsHtml(selectedIds);
-  tileItemsSelectedCount.textContent = selectedIds.length;
+  tileItemsSelected.innerHTML = selectedItemsHtml(addTileSelectedItemIds);
+  tileItemsSelectedCount.textContent = addTileSelectedItemIds.length;
+}
+
+// Live wiki search for the Add-Tile item picker — debounced (network-backed,
+// unlike handleChecklistSearch's plain client-side filter for sets below).
+function handleTileItemsSearchInput(e) {
+  if (e.target !== tileItemsSearch) return;
+  const query = e.target.value;
+
+  clearTimeout(addTileItemSearchDebounceTimer);
+  addTileItemSearchDebounceTimer = setTimeout(async () => {
+    if (!query.trim()) {
+      addTileItemSearchResults = [];
+      tileItemsSelect.innerHTML = "";
+      return;
+    }
+
+    tileItemsSelect.innerHTML = wikiIndex ? "" : "<p class=\"dev-empty\">Loading wiki item index…</p>";
+    await ensureWikiIndexLoaded();
+    if (tileItemsSearch.value !== query) return; // stale — the box moved on while the index (first time only) loaded
+
+    addTileItemSearchResults = await searchPickableItems(supabase, wikiIndex, query);
+    tileItemsSelect.innerHTML = itemSearchResultsHtml(addTileItemSearchResults, addTileSelectedItemIds);
+  }, 250);
+}
+
+async function handleTileItemsSelectClick(e) {
+  const index = e.target.dataset.pickItemIndex;
+  if (index === undefined) return;
+  const result = addTileItemSearchResults[Number(index)];
+  if (!result) return;
+
+  e.target.disabled = true;
+  const item = await resolvePickedItem(supabase, result);
+  resolvedItemsById[item.id] = item;
+  if (!addTileSelectedItemIds.includes(item.id)) addTileSelectedItemIds.push(item.id);
+  tileItemsSelect.innerHTML = itemSearchResultsHtml(addTileItemSearchResults, addTileSelectedItemIds);
+  updateSelectedItemsPanel();
 }
 
 function updateSelectedSetsPanel() {
@@ -801,13 +1088,44 @@ function updateTileFormFieldsVisibility() {
 // Filters a checkbox-list's visible rows by the paired search input's value
 // — delegated on the document since inline tile-edit forms come and go.
 function handleChecklistSearch(e) {
-  if (!e.target.classList.contains("checkbox-search")) return;
+  // Item search boxes carry checkbox-search too (shared styling) but get
+  // their own async, wiki-backed handler instead of this plain client-side
+  // filter — see handleTileItemsSearchInput / handleEditItemsSearchInput.
+  if (!e.target.classList.contains("checkbox-search") || e.target.classList.contains("item-wiki-search")) return;
   const query = e.target.value.trim().toLowerCase();
   const list = e.target.nextElementSibling;
   if (!list) return;
   list.querySelectorAll(".checkbox-row").forEach((row) => {
     row.classList.toggle("hidden", query.length > 0 && !row.textContent.trim().toLowerCase().includes(query));
   });
+}
+
+// Live wiki search for the inline tile-edit form's item picker — same
+// approach as handleTileItemsSearchInput, scoped to whichever card is
+// currently being edited (only one at a time, per editingTileId).
+function handleEditItemsSearchInput(e) {
+  if (!e.target.classList.contains("tile-edit-items-search")) return;
+  const card = e.target.closest(".tile-card");
+  const query = e.target.value;
+
+  clearTimeout(editItemSearchDebounceTimer);
+  editItemSearchDebounceTimer = setTimeout(async () => {
+    const resultsEl = card.querySelector(".tile-edit-items");
+    if (!resultsEl) return;
+
+    if (!query.trim()) {
+      editItemSearchResults = [];
+      resultsEl.innerHTML = "";
+      return;
+    }
+
+    resultsEl.innerHTML = wikiIndex ? "" : "<p class=\"dev-empty\">Loading wiki item index…</p>";
+    await ensureWikiIndexLoaded();
+    if (card.querySelector(".tile-edit-items-search")?.value !== query) return;
+
+    editItemSearchResults = await searchPickableItems(supabase, wikiIndex, query);
+    resultsEl.innerHTML = itemSearchResultsHtml(editItemSearchResults, editSelectedItemIds);
+  }, 250);
 }
 
 function setViewMode(mode) {
@@ -823,25 +1141,35 @@ function setViewMode(mode) {
 
 async function loadBoard() {
   const { data: { session } } = await supabase.auth.getSession();
-  const { clan_id, event_id } = session.user.app_metadata;
+  const clan_id = actingAsDevClanId ?? session.user.app_metadata.clan_id;
+  const event_id = actingAsDevEventId ?? session.user.app_metadata.event_id;
   currentClanId = clan_id;
   currentEventId = event_id;
 
-  const [tileRows, bracketRows, progressRows, signupRows, event, eventClans, itemRows, itemSetRows, leaderboardRows] = await Promise.all([
+  const [tileRows, bracketRows, progressRows, signupRows, event, eventClans, itemSetRows, leaderboardRows] = await Promise.all([
     listTiles(supabase, event_id),
     listBrackets(supabase, event_id),
     listClanTileProgress(supabase, clan_id),
     listClanTileSignups(supabase, clan_id),
     getEvent(supabase, event_id),
     listEventClans(supabase, event_id),
-    listItems(supabase),
     listItemSets(supabase),
     getClanLeaderboard(supabase, event_id),
   ]);
   tiles = tileRows;
   brackets = bracketRows;
-  items = itemRows;
   itemSets = itemSetRows;
+
+  // Items are no longer bulk-loaded (search-driven now, see itemPicker.js) —
+  // instead, resolve just the ids any currently-loaded tile actually
+  // references, so both the View/Progress item modal and the Edit tab's
+  // "Selected" chips can always show a picked item's name/photo, even one
+  // picked in a past session that isn't in this session's search results.
+  const referencedItemIds = tileRows.flatMap((t) =>
+    t.tile_type === "collect_one_of_each" || t.tile_type === "collect_k_of_y" ? t.config.itemIds : []
+  );
+  const resolvedItemRows = await listItemsByIds(supabase, [...new Set(referencedItemIds)]);
+  resolvedItemsById = Object.fromEntries(resolvedItemRows.map((row) => [row.id, row]));
   progressByTileId = Object.fromEntries(progressRows.map((p) => [p.tileId, p]));
   signupsByTileId = {};
   for (const s of signupRows) {
@@ -852,6 +1180,10 @@ async function loadBoard() {
   currentEventStartTime = event.start_time_utc ?? event.created_at;
   currentEventEndTime = event.end_time_utc;
   pointsOverTime = computePointsOverTime(tiles, progressRows, currentEventStartTime);
+  isEventLocked = new Date() >= new Date(currentEventStartTime);
+
+  const memberLists = await Promise.all(itemSets.map((s) => listItemsInSet(supabase, s.id)));
+  itemsBySetId = Object.fromEntries(itemSets.map((s, i) => [s.id, memberLists[i]]));
 
   const ownClan = eventClans.find((c) => c.clanId === clan_id);
   eventClanDisplay.textContent = ownClan ? `${event.name} — ${ownClan.displayName}` : event.name;
@@ -860,6 +1192,7 @@ async function loadBoard() {
   renderBrackets();
   renderItemPickers();
   renderEditTiles();
+  renderItemSetsManagement();
   renderProgressTiles();
   renderAnalytics();
 }
@@ -904,6 +1237,21 @@ async function handleLogout() {
 
 async function init() {
   const { data: { session } } = await supabase.auth.getSession();
+
+  const params = new URLSearchParams(location.search);
+  const actAsClan = params.get("actAsClan");
+  const actAsEvent = params.get("actAsEvent");
+  if (session?.user?.app_metadata?.is_dev && actAsClan && actAsEvent) {
+    actingAsDevClanId = actAsClan;
+    actingAsDevEventId = actAsEvent;
+    actingAsClanName.textContent = params.get("actAsLabel") ?? "this clan";
+    actingAsBanner.classList.remove("hidden");
+    logoutBtn.classList.add("hidden"); // signing out here would end the Dev's session in every tab, not just this one
+    showLoggedIn("Dev", "admin");
+    await loadBoard();
+    return;
+  }
+
   const clanRole = session?.user?.app_metadata?.clan_role;
   const ign = session?.user?.app_metadata?.ign;
   if (clanRole) {
@@ -979,7 +1327,7 @@ async function handleCreateTile() {
 
   const config = buildTileConfig(tileType, {
     target: tileTargetInput.value,
-    itemIds: getCheckedValues(tileItemsSelect),
+    itemIds: addTileSelectedItemIds,
     k: tileKInput.value,
     setIds: getCheckedValues(tileSetsSelect),
     mode: tileModeSelect.value,
@@ -993,7 +1341,9 @@ async function handleCreateTile() {
     tileKInput.value = "";
     tileItemsSearch.value = "";
     tileSetsSearch.value = "";
-    tileItemsSelect.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = false; });
+    addTileSelectedItemIds = [];
+    addTileItemSearchResults = [];
+    tileItemsSelect.innerHTML = "";
     tileSetsSelect.querySelectorAll("input[type=checkbox]").forEach((cb) => { cb.checked = false; });
     await loadBoard();
   } finally {
@@ -1002,9 +1352,8 @@ async function handleCreateTile() {
 }
 
 function updateEditSelectedItemsPanel(card) {
-  const selectedIds = getCheckedValues(card.querySelector(".tile-edit-items"));
-  card.querySelector(".tile-edit-items-selected").innerHTML = selectedItemsHtml(selectedIds);
-  card.querySelector(".tile-edit-items-count").textContent = selectedIds.length;
+  card.querySelector(".tile-edit-items-selected").innerHTML = selectedItemsHtml(editSelectedItemIds);
+  card.querySelector(".tile-edit-items-count").textContent = editSelectedItemIds.length;
 }
 
 function updateEditSelectedSetsPanel(card) {
@@ -1018,9 +1367,9 @@ async function handleEditTilesListClick(e) {
   if (removeSelectedId) {
     const card = e.target.closest(".tile-card");
     if (e.target.closest(".tile-edit-items-selected")) {
-      const checkbox = card.querySelector(`.tile-edit-items input[value="${removeSelectedId}"]`);
-      if (checkbox) checkbox.checked = false;
+      editSelectedItemIds = editSelectedItemIds.filter((id) => id !== removeSelectedId);
       updateEditSelectedItemsPanel(card);
+      card.querySelector(".tile-edit-items").innerHTML = itemSearchResultsHtml(editItemSearchResults, editSelectedItemIds);
     } else if (e.target.closest(".tile-edit-sets-selected")) {
       const checkbox = card.querySelector(`.tile-edit-sets input[value="${removeSelectedId}"]`);
       if (checkbox) checkbox.checked = false;
@@ -1041,6 +1390,10 @@ async function handleEditTilesListClick(e) {
   const editTileId = e.target.dataset.editTile;
   if (editTileId) {
     editingTileId = editTileId;
+    const tile = tiles.find((t) => t.id === editTileId);
+    editSelectedItemIds =
+      tile?.tile_type === "collect_one_of_each" || tile?.tile_type === "collect_k_of_y" ? [...tile.config.itemIds] : [];
+    editItemSearchResults = [];
     renderEditTiles();
     return;
   }
@@ -1049,6 +1402,21 @@ async function handleEditTilesListClick(e) {
   if (cancelTileId) {
     editingTileId = null;
     renderEditTiles();
+    return;
+  }
+
+  const pickItemIndex = e.target.dataset.pickItemIndex;
+  if (pickItemIndex !== undefined && e.target.closest(".tile-edit-items")) {
+    const result = editItemSearchResults[Number(pickItemIndex)];
+    if (!result) return;
+
+    e.target.disabled = true;
+    const item = await resolvePickedItem(supabase, result);
+    resolvedItemsById[item.id] = item;
+    if (!editSelectedItemIds.includes(item.id)) editSelectedItemIds.push(item.id);
+    const card = e.target.closest(".tile-card");
+    card.querySelector(".tile-edit-items").innerHTML = itemSearchResultsHtml(editItemSearchResults, editSelectedItemIds);
+    updateEditSelectedItemsPanel(card);
     return;
   }
 
@@ -1062,7 +1430,7 @@ async function handleEditTilesListClick(e) {
 
     const config = buildTileConfig(tileType, {
       target: card.querySelector(".tile-edit-target").value,
-      itemIds: getCheckedValues(card.querySelector(".tile-edit-items")),
+      itemIds: editSelectedItemIds,
       k: card.querySelector(".tile-edit-k").value,
       setIds: getCheckedValues(card.querySelector(".tile-edit-sets")),
       mode: card.querySelector(".tile-edit-mode").value,
@@ -1092,10 +1460,10 @@ function handleEditTilesListChange(e) {
     return;
   }
 
-  if (e.target.closest(".tile-edit-items")) {
-    updateEditSelectedItemsPanel(card);
-    return;
-  }
+  // .tile-edit-items no longer contains checkboxes (it's a live search
+  // results list now — picking updates state directly, see
+  // handleEditTilesListClick's pickItemIndex branch), so no "change" event
+  // to react to there. .tile-edit-sets is unchanged.
   if (e.target.closest(".tile-edit-sets")) {
     updateEditSelectedSetsPanel(card);
   }
@@ -1122,16 +1490,16 @@ progressTabBtn.addEventListener("click", () => setViewMode("progress"));
 analyticsTabBtn.addEventListener("click", () => setViewMode("analytics"));
 pointsChart.addEventListener("click", handleChartPointClick);
 tileTypeSelect.addEventListener("change", updateTileFormFieldsVisibility);
-tileItemsSearch.addEventListener("input", handleChecklistSearch);
+tileItemsSearch.addEventListener("input", handleTileItemsSearchInput);
 tileSetsSearch.addEventListener("input", handleChecklistSearch);
-tileItemsSelect.addEventListener("change", updateSelectedItemsPanel);
+tileItemsSelect.addEventListener("click", handleTileItemsSelectClick);
 tileSetsSelect.addEventListener("change", updateSelectedSetsPanel);
 tileItemsSelected.addEventListener("click", (e) => {
   const id = e.target.dataset.removeSelected;
   if (!id) return;
-  const checkbox = tileItemsSelect.querySelector(`input[value="${id}"]`);
-  if (checkbox) checkbox.checked = false;
+  addTileSelectedItemIds = addTileSelectedItemIds.filter((i) => i !== id);
   updateSelectedItemsPanel();
+  tileItemsSelect.innerHTML = itemSearchResultsHtml(addTileItemSearchResults, addTileSelectedItemIds);
 });
 tileSetsSelected.addEventListener("click", (e) => {
   const id = e.target.dataset.removeSelected;
@@ -1146,6 +1514,11 @@ createTileBtn.addEventListener("click", handleCreateTile);
 editTilesList.addEventListener("click", handleEditTilesListClick);
 editTilesList.addEventListener("change", handleEditTilesListChange);
 editTilesList.addEventListener("input", handleChecklistSearch);
+editTilesList.addEventListener("input", handleEditItemsSearchInput);
+
+createItemSetBtn.addEventListener("click", handleCreateItemSet);
+itemSetsManagementList.addEventListener("click", handleItemSetsManagementListClick);
+itemSetsManagementList.addEventListener("input", handleItemSetSearchInput);
 
 boardGrid.addEventListener("click", async (e) => {
   const viewItemsTileId = e.target.dataset.viewItems;

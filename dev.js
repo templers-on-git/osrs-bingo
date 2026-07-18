@@ -13,10 +13,6 @@ import {
   deleteClan,
   updateClan,
   regenerateClanPassword,
-  createItem,
-  listItems,
-  updateItem,
-  deleteItem,
   createItemSet,
   listItemSets,
   updateItemSet,
@@ -25,6 +21,8 @@ import {
   removeItemFromSet,
   listItemsInSet,
 } from "./admin.js";
+import { loadWikiItemIndex, EQUIPMENT_SLOTS, groupBySlotBucket, slotBucketFor } from "./wikiItems.js";
+import { searchPickableItems, resolvePickedItem } from "./itemPicker.js";
 
 const SUPABASE_URL = "https://swqaheqhglqtolzbtgfe.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_MSHvLGLg1hKI7BdqGtAP-Q_biIwaDUL";
@@ -48,21 +46,28 @@ const createEventBtn = document.getElementById("create-event-btn");
 const unassignedClansList = document.getElementById("unassigned-clans-list");
 const eventsList = document.getElementById("events-list");
 
-const itemNameInput = document.getElementById("item-name-input");
-const itemPhotoInput = document.getElementById("item-photo-input");
-const createItemBtn = document.getElementById("create-item-btn");
-const itemsList = document.getElementById("items-list");
 const itemSetNameInput = document.getElementById("item-set-name-input");
 const createItemSetBtn = document.getElementById("create-item-set-btn");
 const itemSetsList = document.getElementById("item-sets-list");
 
 let events = [];
 let clans = [];
-let items = [];
 let itemSets = [];
 let itemsBySetId = {}; // set id -> array of item rows currently in that set
-let editingItemId = null;
 let editingItemSetId = null;
+
+// Lazily loaded on first search-box interaction (a full pull of the OSRS
+// Wiki's item index — see wikiItems.js), then cached for the rest of the
+// Dev session rather than reloaded per set card.
+let wikiIndex = null;
+let wikiIndexLoading = null;
+
+// Last search results per (set id, doll slot), so a click on "Add" can look
+// the picked result back up without round-tripping it through a DOM
+// attribute. Nested by slot since each equipment-doll cell searches/caches
+// independently — shape: { [setId]: { [slot]: results } }.
+let searchResultsBySetId = {};
+let searchDebounceTimer = null;
 const editingEndTimeFor = new Set(); // event ids currently showing the end-time editor
 const editingStartTimeFor = new Set(); // event ids currently showing the start-time editor
 
@@ -113,17 +118,11 @@ async function handleLogout() {
 }
 
 async function loadDashboard() {
-  [events, clans, items, itemSets] = await Promise.all([
-    listEvents(supabase),
-    listClans(supabase),
-    listItems(supabase),
-    listItemSets(supabase),
-  ]);
+  [events, clans, itemSets] = await Promise.all([listEvents(supabase), listClans(supabase), listItemSets(supabase)]);
   const memberLists = await Promise.all(itemSets.map((s) => listItemsInSet(supabase, s.id)));
   itemsBySetId = Object.fromEntries(itemSets.map((s, i) => [s.id, memberLists[i]]));
 
   renderDashboard();
-  renderItems();
   renderItemSets();
 }
 
@@ -138,11 +137,15 @@ function toDatetimeLocalValue(isoString) {
 
 // Shared row markup for a clan, used both in the unassigned list and inside
 // each event card — showRemove only makes sense for clans already on an event.
-function clanRowHtml(c, { showRemove }) {
+function clanRowHtml(c, { showRemove, eventId }) {
+  const actAsLink = eventId
+    ? `<a class="btn-ghost" href="login.html?actAsClan=${encodeURIComponent(c.clanId)}&actAsEvent=${encodeURIComponent(eventId)}&actAsLabel=${encodeURIComponent(c.displayName)}" target="_blank" rel="noopener">Act as Admin</a>`
+    : "";
   return `
     <li>
       <span>${c.displayName}${c.prefix ? ` (${c.prefix})` : ""}</span>
       <span class="dev-row-actions">
+        ${actAsLink}
         ${showRemove ? `<button class="btn-ghost" data-remove-clan="${c.clanId}">Remove</button>` : ""}
         <button class="btn-ghost" data-rename-clan="${c.clanId}">Rename</button>
         <button class="btn-ghost" data-regen="${c.clanId}" data-role="admin">Regen admin pw</button>
@@ -198,7 +201,7 @@ function renderDashboard() {
         </p>
         <ul class="dev-list">
           ${assigned.length
-            ? assigned.map((c) => clanRowHtml(c, { showRemove: true })).join("")
+            ? assigned.map((c) => clanRowHtml(c, { showRemove: true, eventId: event.id })).join("")
             : "<li class=\"dev-empty\">No clans yet</li>"}
         </ul>
         ${unassigned.length ? `
@@ -210,40 +213,47 @@ function renderDashboard() {
   }).join("");
 }
 
-function itemRowHtml(item) {
-  if (item.id === editingItemId) return itemFormHtml(item);
-
-  return `
-    <li>
-      <span>${item.photo_url ? `<img src="${escapeAttr(item.photo_url)}" alt="" class="item-thumb">` : ""}${escapeAttr(item.name)}</span>
-      <span class="dev-row-actions">
-        <button class="btn-ghost" data-edit-item="${item.id}">Edit</button>
-        <button class="btn-ghost" data-delete-item="${item.id}">Delete</button>
-      </span>
-    </li>`;
+function slotLabel(slot) {
+  return slot === "other" ? "Other (non-equipment)" : slot[0].toUpperCase() + slot.slice(1);
 }
 
-function itemFormHtml(item) {
+function searchResultRowHtml(result, index, setId, slot) {
   return `
-    <li>
-      <span class="dev-form">
-        <input class="item-edit-name" value="${escapeAttr(item.name)}" placeholder="Item name">
-        <input class="item-edit-photo" value="${escapeAttr(item.photo_url ?? "")}" placeholder="Photo URL">
-        <button class="btn-ghost" data-save-item="${item.id}">Save</button>
-        <button class="btn-ghost" data-cancel-edit-item="${item.id}">Cancel</button>
-      </span>
-    </li>`;
+    <div class="checkbox-row">
+      ${result.photoUrl ? `<img src="${escapeAttr(result.photoUrl)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
+      <span>${escapeAttr(result.name)}${result.equipmentSlot === "2h" ? " (2h)" : ""}${result.source === "wiki" ? " <em>(from wiki)</em>" : ""}</span>
+      <button class="btn-ghost" data-pick-result-index="${index}" data-pick-set-id="${escapeAttr(setId)}" data-pick-slot="${slot}">Add</button>
+    </div>`;
 }
 
-function renderItems() {
-  itemsList.innerHTML = items.length ? items.map(itemRowHtml).join("") : "<li class=\"dev-empty\">No items yet</li>";
+// One equipment-doll cell: a slot label, whatever the set currently has in
+// that slot (2h weapons get a "(2h)" badge rather than a merged Weapon/
+// Shield cell — see slotBucketFor in wikiItems.js for why), and its own
+// independent search box.
+function dollSlotHtml(setId, slot, members, extraClass = "") {
+  return `
+    <div class="doll-slot ${extraClass}" data-slot="${slot}">
+      <p class="doll-slot-label">${slotLabel(slot)}</p>
+      <div class="doll-slot-members">
+        ${members.length
+          ? members.map((m) => `
+            <div class="selected-chip">
+              ${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
+              <span>${escapeAttr(m.name)}${m.equipment_slot === "2h" ? " (2h)" : ""}</span>
+              <button class="selected-remove" data-remove-member="${m.id}" data-set-id="${setId}">&times;</button>
+            </div>`).join("")
+          : "<p class=\"dev-empty\">Empty</p>"}
+      </div>
+      <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${slot}" placeholder="Search ${slotLabel(slot).toLowerCase()}..." autocomplete="off">
+      <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${slot}"></div>
+    </div>`;
 }
 
 function itemSetCardHtml(set) {
   if (set.id === editingItemSetId) return itemSetFormHtml(set);
 
   const members = itemsBySetId[set.id] || [];
-  const availableToAdd = items.filter((i) => !members.some((m) => m.id === i.id));
+  const grouped = groupBySlotBucket(members, (m) => m.equipment_slot);
 
   return `
     <div class="dev-event-card">
@@ -252,22 +262,10 @@ function itemSetCardHtml(set) {
         <button class="btn-ghost" data-edit-item-set="${set.id}">Rename</button>
         <button class="btn-ghost" data-delete-item-set="${set.id}">Delete</button>
       </h3>
-      <ul class="dev-list">
-        ${members.length
-          ? members.map((m) => `
-            <li>
-              <span>${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb">` : ""}${escapeAttr(m.name)}</span>
-              <button class="btn-ghost" data-remove-member="${m.id}" data-set-id="${set.id}">Remove</button>
-            </li>`).join("")
-          : "<li class=\"dev-empty\">No items yet</li>"}
-      </ul>
-      ${availableToAdd.length ? `
-        <div class="dev-form">
-          <select data-add-member-select="${set.id}">
-            ${availableToAdd.map((i) => `<option value="${i.id}">${escapeAttr(i.name)}</option>`).join("")}
-          </select>
-          <button class="btn-ghost" data-add-member-btn="${set.id}">Add to set</button>
-        </div>` : ""}
+      <div class="equipment-doll">
+        ${EQUIPMENT_SLOTS.map((slot) => dollSlotHtml(set.id, slot, grouped[slot])).join("")}
+      </div>
+      ${dollSlotHtml(set.id, "other", grouped.other, "doll-slot-other")}
     </div>`;
 }
 
@@ -288,57 +286,52 @@ function renderItemSets() {
     : "<p class=\"dev-empty\">No item sets yet.</p>";
 }
 
-async function handleCreateItem() {
-  const name = itemNameInput.value.trim();
-  const photoUrl = itemPhotoInput.value.trim() || null;
-  if (!name) return;
-
-  createItemBtn.disabled = true;
-  try {
-    await createItem(supabase, { name, photoUrl });
-    itemNameInput.value = "";
-    itemPhotoInput.value = "";
-    await loadDashboard();
-  } finally {
-    createItemBtn.disabled = false;
-  }
+async function ensureWikiIndexLoaded() {
+  if (wikiIndex) return wikiIndex;
+  if (!wikiIndexLoading) wikiIndexLoading = loadWikiItemIndex(fetch);
+  wikiIndex = await wikiIndexLoading;
+  return wikiIndex;
 }
 
-async function handleItemsListClick(e) {
-  const deleteItemId = e.target.dataset.deleteItem;
-  if (deleteItemId) {
-    if (confirm("Delete this item? It will be removed from any sets it belongs to.")) {
-      await deleteItem(supabase, deleteItemId);
-      await loadDashboard();
+// Delegated on itemSetsList (not attached per-input, since cards are
+// recreated on every render) — debounced so typing doesn't hit the DB and
+// re-filter the wiki index on every keystroke. Renders straight into this
+// one set's results container rather than going through loadDashboard()/
+// renderItemSets(), so the input keeps focus and other cards' in-progress
+// searches aren't disturbed.
+function handleItemSetSearchInput(e) {
+  if (!e.target.classList.contains("item-set-add-search")) return;
+  const setId = e.target.dataset.setId;
+  const slot = e.target.dataset.slot;
+  const query = e.target.value;
+
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(async () => {
+    const resultsEl = itemSetsList.querySelector(`.item-set-add-results[data-set-id="${setId}"][data-slot="${slot}"]`);
+    if (!resultsEl) return;
+
+    (searchResultsBySetId[setId] ??= {})[slot] = [];
+    if (!query.trim()) {
+      resultsEl.innerHTML = "";
+      return;
     }
-    return;
-  }
 
-  const editItemId = e.target.dataset.editItem;
-  if (editItemId) {
-    editingItemId = editItemId;
-    renderItems();
-    return;
-  }
+    resultsEl.innerHTML = wikiIndex ? "" : "<p class=\"dev-empty\">Loading wiki item index…</p>";
+    await ensureWikiIndexLoaded();
 
-  const cancelItemId = e.target.dataset.cancelEditItem;
-  if (cancelItemId) {
-    editingItemId = null;
-    renderItems();
-    return;
-  }
+    // The debounced query may be stale by the time the (possibly slow,
+    // first-ever) wiki index load resolves — bail if the box moved on.
+    if (itemSetsList.querySelector(`.item-set-add-search[data-set-id="${setId}"][data-slot="${slot}"]`)?.value !== query) return;
 
-  const saveItemId = e.target.dataset.saveItem;
-  if (saveItemId) {
-    const row = e.target.closest("li");
-    const name = row.querySelector(".item-edit-name").value.trim();
-    const photoUrl = row.querySelector(".item-edit-photo").value.trim() || null;
-    if (!name) return;
-
-    await updateItem(supabase, saveItemId, { name, photoUrl });
-    editingItemId = null;
-    await loadDashboard();
-  }
+    // Search across everything, then narrow to just this cell's slot —
+    // reuses the same itemPicker.js orchestration as every other search box.
+    const allResults = await searchPickableItems(supabase, wikiIndex, query);
+    const results = allResults.filter((r) => slotBucketFor(r.equipmentSlot) === slot);
+    searchResultsBySetId[setId][slot] = results;
+    resultsEl.innerHTML = results.length
+      ? results.map((r, i) => searchResultRowHtml(r, i, setId, slot)).join("")
+      : "<p class=\"dev-empty\">No matches</p>";
+  }, 250);
 }
 
 async function handleCreateItemSet() {
@@ -399,13 +392,16 @@ async function handleItemSetsListClick(e) {
     return;
   }
 
-  const addMemberSetId = e.target.dataset.addMemberBtn;
-  if (addMemberSetId) {
-    const select = itemSetsList.querySelector(`select[data-add-member-select="${addMemberSetId}"]`);
-    if (select?.value) {
-      await addItemToSet(supabase, addMemberSetId, select.value);
-      await loadDashboard();
-    }
+  const pickSetId = e.target.dataset.pickSetId;
+  if (pickSetId) {
+    const slot = e.target.dataset.pickSlot;
+    const result = (searchResultsBySetId[pickSetId]?.[slot] || [])[Number(e.target.dataset.pickResultIndex)];
+    if (!result) return;
+
+    e.target.disabled = true;
+    const item = await resolvePickedItem(supabase, result);
+    await addItemToSet(supabase, pickSetId, item.id);
+    await loadDashboard();
   }
 }
 
@@ -569,10 +565,9 @@ eventsList.addEventListener("click", async (e) => {
 
 createClanBtn.addEventListener("click", handleCreateClan);
 createEventBtn.addEventListener("click", handleCreateEvent);
-createItemBtn.addEventListener("click", handleCreateItem);
-itemsList.addEventListener("click", handleItemsListClick);
 createItemSetBtn.addEventListener("click", handleCreateItemSet);
 itemSetsList.addEventListener("click", handleItemSetsListClick);
+itemSetsList.addEventListener("input", handleItemSetSearchInput);
 
 async function init() {
   const { data: { session } } = await supabase.auth.getSession();

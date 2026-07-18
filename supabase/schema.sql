@@ -70,6 +70,18 @@ create table if not exists items (
   photo_url text
 );
 
+-- `create table if not exists` above won't retroactively add these columns
+-- to the live project's already-existing items table. wiki_page_name is the
+-- stable dedup key for items auto-cached from an OSRS Wiki search pick (see
+-- getOrCreateItemFromWiki in admin.js) — legacy hand-entered items and any
+-- future non-wiki item keep it null, which the partial unique index below
+-- allows (a plain `unique` column would too, but the partial index says so
+-- explicitly and stays safely re-runnable, unlike `add constraint`, which
+-- has no IF NOT EXISTS form).
+alter table items add column if not exists equipment_slot text;
+alter table items add column if not exists wiki_page_name text;
+create unique index if not exists items_wiki_page_name_key on items (wiki_page_name) where wiki_page_name is not null;
+
 create table if not exists item_sets (
   id uuid primary key default gen_random_uuid(),
   name text not null

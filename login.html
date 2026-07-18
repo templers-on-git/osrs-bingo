@@ -8,6 +8,10 @@
 </head>
 <body>
 
+  <div id="acting-as-dev-banner" class="acting-as-banner hidden">
+    🛠️ Acting as <strong id="acting-as-clan-name"></strong> (Dev) — close this tab to exit
+  </div>
+
   <!-- Login Screen -->
   <div id="name-screen">
     <div class="name-card">
@@ -82,8 +86,8 @@
           </div>
           <div id="tile-items-picker" class="picker-columns hidden">
             <div class="picker-column">
-              <p class="dev-muted">All Items</p>
-              <input type="text" id="tile-items-search" class="checkbox-search" placeholder="Search items...">
+              <p class="dev-muted">Search items to add</p>
+              <input type="text" id="tile-items-search" class="checkbox-search item-wiki-search" placeholder="Search the OSRS Wiki...">
               <div id="tile-items-select" class="checkbox-list"></div>
             </div>
             <div class="picker-column">
@@ -108,6 +112,17 @@
         <section class="dev-section">
           <h2>Board Tiles</h2>
           <div id="edit-tiles-list"></div>
+        </section>
+
+        <section class="dev-section">
+          <h2>Item Sets</h2>
+          <p class="dev-muted">Items are searched live from the OSRS Wiki and cached automatically the first time you add one to a set.</p>
+          <p id="item-sets-locked-note" class="dev-muted hidden">Locked — your event has started; ask the Dev for changes.</p>
+          <div id="item-sets-create-form" class="dev-form">
+            <input id="item-set-name-input" placeholder="Set name" autocomplete="off">
+            <button id="create-item-set-btn">Add Set</button>
+          </div>
+          <div id="item-sets-management-list"></div>
         </section>
       </div>
 

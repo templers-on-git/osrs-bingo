@@ -57,6 +57,23 @@ as $$
   select auth.jwt() -> 'app_metadata' ->> 'ign'
 $$;
 
+-- True once "now" is at/after the calling admin's own current event's
+-- effective start (start_time_utc if set, else created_at as a fallback —
+-- same convention as the Analytics points-over-time graph). No
+-- current_event_id() at all (e.g. a pure Dev session with no clan_id) ->
+-- false, matching this file's "no session data = safe default" pattern.
+-- Used to lock item_sets/item_set_members writes to Dev-only once an
+-- admin's own event has begun — see item_sets_write below.
+create or replace function current_event_started()
+returns boolean
+language sql stable
+as $$
+  select coalesce(
+    (select now() >= coalesce(e.start_time_utc, e.created_at) from events e where e.id = current_event_id()),
+    false
+  )
+$$;
+
 -- ── Lock down the clans table entirely ──────────────────────────────────────
 -- Column-level revokes don't work here: Supabase's "automatically expose new
 -- tables" setting grants anon/authenticated table-level SELECT on clans, and
@@ -134,13 +151,45 @@ alter table item_sets enable row level security;
 alter table item_set_members enable row level security;
 
 create policy items_select on items for select using (current_clan_id() is not null or current_is_dev());
-create policy items_dev_write on items for all using (current_is_dev()) with check (current_is_dev());
+
+-- items writes are split into 3 policies (not one `for all`, which can't
+-- express "yes insert, no update") because caching a wiki-search pick while
+-- building a tile should stay open to admins always — regardless of the
+-- item_sets lock below — but renaming/deleting a globally-shared item stays
+-- Dev-only, since it could silently affect other events' tiles/sets.
+-- items_dev_write is dropped explicitly (not just superseded) since a plain
+-- `create policy` alongside it would leave the old, wider policy still
+-- active — RLS policies are permissive by default (OR'd together), so an
+-- unwanted old policy doesn't get overridden by a newer, narrower one.
+drop policy if exists items_dev_write on items;
+create policy items_insert on items for insert with check (
+  current_is_dev() or current_role_claim() = 'admin'
+);
+create policy items_dev_update on items for update using (current_is_dev()) with check (current_is_dev());
+create policy items_dev_delete on items for delete using (current_is_dev());
 
 create policy item_sets_select on item_sets for select using (current_clan_id() is not null or current_is_dev());
-create policy item_sets_dev_write on item_sets for all using (current_is_dev()) with check (current_is_dev());
+
+-- Admin-writable, but locked to Dev-only once the admin's own event has
+-- started (current_event_started()) — Liel wants admins building sets
+-- during setup, not touching them once an event is live.
+drop policy if exists item_sets_dev_write on item_sets;
+create policy item_sets_write on item_sets for all using (
+  current_is_dev() or (current_role_claim() = 'admin' and not current_event_started())
+) with check (
+  current_is_dev() or (current_role_claim() = 'admin' and not current_event_started())
+);
 
 create policy item_set_members_select on item_set_members for select using (current_clan_id() is not null or current_is_dev());
-create policy item_set_members_dev_write on item_set_members for all using (current_is_dev()) with check (current_is_dev());
+
+-- Same lock as item_sets_write above — adding/removing a set's members is
+-- "touching the set" just as much as renaming/deleting it.
+drop policy if exists item_set_members_dev_write on item_set_members;
+create policy item_set_members_write on item_set_members for all using (
+  current_is_dev() or (current_role_claim() = 'admin' and not current_event_started())
+) with check (
+  current_is_dev() or (current_role_claim() = 'admin' and not current_event_started())
+);
 
 -- ── tile_progress — the actual privacy-sensitive table: detail stays within
 --    your own clan; other clans' totals come only through clan_totals() below

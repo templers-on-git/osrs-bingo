@@ -91,6 +91,18 @@ body {
 
 .error-text { color: #d96a6a; font-size: 14px; margin-top: 12px; }
 
+.acting-as-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #d9a441;
+  color: #1a1a1a;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+}
+
 /* Class variants of #name-input/#name-btn above, for pages needing more
    than one input (e.g. login.html's ign + password) where a single shared
    ID wouldn't work. */
@@ -472,6 +484,65 @@ main {
 }
 
 .selected-remove:hover { color: #e07070; }
+
+/* ── Equipment-slot doll (item-set builder) ──
+   Grid layout mirrors the in-game equipment interface: Head top-center;
+   Cape/Neck/Ammo row; Weapon/Body/Shield row; Legs center; Hands/Feet/Ring
+   row. "Other" (non-equipable items) is a full-width row below, not part
+   of the doll proper. */
+.equipment-doll {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-areas:
+    ".      head   ."
+    "cape   neck   ammo"
+    "weapon body   shield"
+    ".      legs   ."
+    "hands  feet   ring";
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.doll-slot {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 0;
+}
+
+.doll-slot[data-slot="head"] { grid-area: head; }
+.doll-slot[data-slot="cape"] { grid-area: cape; }
+.doll-slot[data-slot="neck"] { grid-area: neck; }
+.doll-slot[data-slot="ammo"] { grid-area: ammo; }
+.doll-slot[data-slot="weapon"] { grid-area: weapon; }
+.doll-slot[data-slot="body"] { grid-area: body; }
+.doll-slot[data-slot="shield"] { grid-area: shield; }
+.doll-slot[data-slot="legs"] { grid-area: legs; }
+.doll-slot[data-slot="hands"] { grid-area: hands; }
+.doll-slot[data-slot="feet"] { grid-area: feet; }
+.doll-slot[data-slot="ring"] { grid-area: ring; }
+
+.doll-slot-other {
+  margin-top: 10px;
+}
+
+.doll-slot-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+}
+
+.doll-slot-members {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.doll-slot-members .selected-chip { font-size: 13px; }
 
 /* ── Item bank (Dev dashboard) ── */
 .item-thumb {

@@ -35,6 +35,9 @@ import {
   addItemToSet,
   removeItemFromSet,
   listItemsInSet,
+  listItemsByIds,
+  searchLocalItems,
+  getOrCreateItemFromWiki,
 } from "./admin.js";
 
 describe("createEvent", () => {
@@ -635,6 +638,127 @@ describe("listItemsInSet", () => {
       { id: "item-1", name: "Zulrah's scales", photo_url: null },
       { id: "item-2", name: "Tanzanite fang", photo_url: null },
     ]);
+  });
+});
+
+describe("listItemsByIds", () => {
+  it("selects items whose id is in the given list", async () => {
+    const items = [
+      { id: "item-1", name: "Zulrah's scales", photo_url: null },
+      { id: "item-2", name: "Tanzanite fang", photo_url: null },
+    ];
+    const inFn = vi.fn().mockResolvedValue({ data: items, error: null });
+    const select = vi.fn(() => ({ in: inFn }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await listItemsByIds(fakeSupabase, ["item-1", "item-2"]);
+
+    expect(from).toHaveBeenCalledWith("items");
+    expect(inFn).toHaveBeenCalledWith("id", ["item-1", "item-2"]);
+    expect(result).toEqual(items);
+  });
+
+  it("short-circuits to an empty array without querying when itemIds is empty", async () => {
+    const from = vi.fn();
+    const fakeSupabase = { from };
+
+    const result = await listItemsByIds(fakeSupabase, []);
+
+    expect(from).not.toHaveBeenCalled();
+    expect(result).toEqual([]);
+  });
+});
+
+describe("searchLocalItems", () => {
+  it("selects items whose name matches the query, case-insensitively", async () => {
+    const items = [{ id: "item-1", name: "Zulrah's scales", photo_url: null }];
+    const limit = vi.fn().mockResolvedValue({ data: items, error: null });
+    const ilike = vi.fn(() => ({ limit }));
+    const select = vi.fn(() => ({ ilike }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await searchLocalItems(fakeSupabase, "zulrah");
+
+    expect(from).toHaveBeenCalledWith("items");
+    expect(ilike).toHaveBeenCalledWith("name", "%zulrah%");
+    expect(limit).toHaveBeenCalledWith(20);
+    expect(result).toEqual(items);
+  });
+});
+
+describe("getOrCreateItemFromWiki", () => {
+  const wikiItem = { name: "Twisted bow", photoUrl: "https://x/tbow.png", equipmentSlot: "2h", wikiPageName: "Twisted bow" };
+
+  it("returns the existing row when one already has this wiki_page_name", async () => {
+    const existingRow = { id: "item-1", name: "Twisted bow", photo_url: "https://x/tbow.png" };
+    const maybeSingle = vi.fn().mockResolvedValue({ data: existingRow, error: null });
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const fakeSupabase = { from };
+
+    const result = await getOrCreateItemFromWiki(fakeSupabase, wikiItem);
+
+    expect(from).toHaveBeenCalledWith("items");
+    expect(eq).toHaveBeenCalledWith("wiki_page_name", "Twisted bow");
+    expect(result).toEqual(existingRow);
+  });
+
+  it("inserts a new row when none exists yet", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    const selectEq = vi.fn(() => ({ maybeSingle }));
+    const selectForFind = vi.fn(() => ({ eq: selectEq }));
+
+    const insertedRow = { id: "item-2", name: "Twisted bow", photo_url: "https://x/tbow.png" };
+    const single = vi.fn().mockResolvedValue({ data: insertedRow, error: null });
+    const selectForInsert = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select: selectForInsert }));
+
+    let selectCallCount = 0;
+    const select = vi.fn(() => {
+      selectCallCount += 1;
+      return selectCallCount === 1 ? { eq: selectEq } : selectForInsert();
+    });
+    const from = vi.fn(() => ({ select, insert }));
+    const fakeSupabase = { from };
+
+    const result = await getOrCreateItemFromWiki(fakeSupabase, wikiItem);
+
+    expect(insert).toHaveBeenCalledWith({
+      name: "Twisted bow",
+      photo_url: "https://x/tbow.png",
+      equipment_slot: "2h",
+      wiki_page_name: "Twisted bow",
+    });
+    expect(result).toEqual(insertedRow);
+  });
+
+  it("re-selects and returns the winner when a concurrent insert already won (unique_violation)", async () => {
+    const findMaybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+    const findEq = vi.fn(() => ({ maybeSingle: findMaybeSingle }));
+
+    const insertSingle = vi.fn().mockResolvedValue({ data: null, error: { code: "23505" } });
+    const insertSelect = vi.fn(() => ({ single: insertSingle }));
+    const insert = vi.fn(() => ({ select: insertSelect }));
+
+    const winnerRow = { id: "item-3", name: "Twisted bow", photo_url: "https://x/tbow.png" };
+    const raceMaybeSingle = vi.fn().mockResolvedValue({ data: winnerRow, error: null });
+    const raceEq = vi.fn(() => ({ maybeSingle: raceMaybeSingle }));
+
+    let selectCallCount = 0;
+    const select = vi.fn(() => {
+      selectCallCount += 1;
+      return { eq: selectCallCount === 1 ? findEq : raceEq };
+    });
+    const from = vi.fn(() => ({ select, insert }));
+    const fakeSupabase = { from };
+
+    const result = await getOrCreateItemFromWiki(fakeSupabase, wikiItem);
+
+    expect(select).toHaveBeenCalledTimes(2);
+    expect(result).toEqual(winnerRow);
   });
 });
 
