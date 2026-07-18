@@ -5,8 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Templars Bingo Website — Log In</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    (function () {
+      var t = localStorage.getItem("bingo-theme");
+      if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
 </head>
 <body>
+
+  <button id="theme-toggle-btn" class="theme-toggle" title="Toggle dark/light theme"></button>
 
   <div id="acting-as-dev-banner" class="acting-as-banner hidden">
     🛠️ Acting as <strong id="acting-as-clan-name"></strong> (Dev) — close this tab to exit
@@ -29,6 +38,20 @@
   <div id="loggedin-screen" class="hidden">
     <header>
       <h1>⚔️ Templars Bingo Website</h1>
+      <div class="stats-bar">
+        <div class="stat">
+          <span class="stat-label">Points</span>
+          <span class="stat-value" id="stat-points">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Tiles Done</span>
+          <span class="stat-value" id="stat-completed">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Progress</span>
+          <span class="stat-value" id="stat-percent">—</span>
+        </div>
+      </div>
       <span class="event-clan-display" id="event-clan-display"></span>
       <div id="admin-tabs" class="header-right hidden">
         <button class="btn-ghost" id="view-tab-btn">View</button>
@@ -44,10 +67,7 @@
     <main>
       <!-- View: same rendering for Players and Admins -->
       <div id="view-pane">
-        <label class="checkbox-row hide-completed-toggle">
-          <input type="checkbox" id="view-hide-completed-toggle">
-          Hide completed tiles
-        </label>
+        <button class="btn-ghost hide-completed-toggle" id="view-hide-completed-toggle">Hide completed tiles</button>
         <div id="board-grid"></div>
       </div>
 
@@ -129,10 +149,7 @@
       <!-- Progress: Admin-only, separate from Edit so marking progress during
            a live event never risks a stray click on a tile-delete button -->
       <div id="progress-pane" class="hidden">
-        <label class="checkbox-row hide-completed-toggle">
-          <input type="checkbox" id="progress-hide-completed-toggle">
-          Hide completed tiles
-        </label>
+        <button class="btn-ghost hide-completed-toggle" id="progress-hide-completed-toggle">Hide completed tiles</button>
         <div id="progress-tiles-list"></div>
       </div>
 

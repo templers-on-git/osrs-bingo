@@ -23,6 +23,11 @@ import {
 } from "./admin.js";
 import { loadWikiItemIndex, EQUIPMENT_SLOTS, groupBySlotBucket, slotBucketFor } from "./wikiItems.js";
 import { searchPickableItems, resolvePickedItem } from "./itemPicker.js";
+import { initTheme } from "./theme.js";
+import { showError, installGlobalErrorToasts } from "./errorToast.js";
+
+initTheme(document.getElementById("theme-toggle-btn"));
+installGlobalErrorToasts();
 
 const SUPABASE_URL = "https://swqaheqhglqtolzbtgfe.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_MSHvLGLg1hKI7BdqGtAP-Q_biIwaDUL";
@@ -239,7 +244,7 @@ function searchResultRowHtml(result, index, setId, slot) {
 function dollSlotButtonHtml(setId, slot, members, isSelected) {
   const first = members[0];
   return `
-    <button type="button" class="doll-slot ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${slot}" title="${slotLabel(slot)}">
+    <button type="button" class="doll-slot ${members.length ? "occupied" : ""} ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${slot}" title="${slotLabel(slot)}">
       ${first?.photo_url ? `<img src="${escapeAttr(first.photo_url)}" alt="" class="doll-slot-icon" referrerpolicy="no-referrer">` : ""}
       ${members.length > 1 ? `<span class="doll-slot-badge">${members.length}</span>` : ""}
     </button>`;
@@ -294,19 +299,24 @@ function dollDetailPanelHtml(setId, selectedSlot, grouped) {
   return `
     <div class="doll-detail-panel">
       <p class="doll-detail-label">${slotLabel(selectedSlot)}</p>
-      <div class="doll-slot-members">
-        ${members.length
-          ? members.map((m) => `
-            <div class="selected-chip">
-              ${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
-              <span>${escapeAttr(m.name)}${m.equipment_slot === "2h" ? " (2h)" : ""}</span>
-              <button class="selected-remove" data-remove-member="${m.id}" data-set-id="${setId}">&times;</button>
-            </div>`).join("")
-          : "<p class=\"dev-empty\">Empty</p>"}
-      </div>
+      <div class="doll-slot-members">${memberChipsHtml(members, setId)}</div>
       <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${selectedSlot}" placeholder="Search ${slotLabel(selectedSlot).toLowerCase()}..." autocomplete="off">
       <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${selectedSlot}"></div>
     </div>`;
+}
+
+// Extracted so refreshItemSetMembers can update just the members list after
+// an add/remove, without touching the search input/results next to it (see
+// that function's comment for why).
+function memberChipsHtml(members, setId) {
+  return members.length
+    ? members.map((m) => `
+      <div class="selected-chip">
+        ${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
+        <span>${escapeAttr(m.name)}${m.equipment_slot === "2h" ? " (2h)" : ""}</span>
+        <button class="selected-remove" data-remove-member="${m.id}" data-set-id="${setId}">&times;</button>
+      </div>`).join("")
+    : "<p class=\"dev-empty\">Empty</p>";
 }
 
 function itemSetCardHtml(set) {
@@ -351,13 +361,32 @@ function rerenderItemSetCard(setId) {
   if (cardEl) cardEl.outerHTML = itemSetCardHtml(set);
 }
 
-// After adding/removing a member, only that one set's membership actually
-// changed — re-fetching everything via loadDashboard() (events, clans, every
-// other set) and re-rendering the whole list would be the same unnecessary
-// churn rerenderItemSetCard was introduced to avoid above.
+// After adding/removing a member, only the doll icons/badges and the
+// members list actually need to change — NOT the whole card via
+// rerenderItemSetCard, since that regenerates the search input and results
+// list from scratch too, wiping an in-progress query and its results. That
+// made picking several same-named items in a row (e.g. "rune sword", "rune
+// platebody") require retyping the search after every single pick. Leaving
+// the search input/results DOM untouched here fixes that.
 async function refreshItemSetMembers(setId) {
   itemsBySetId[setId] = await listItemsInSet(supabase, setId);
-  rerenderItemSetCard(setId);
+
+  const cardEl = itemSetsList.querySelector(`[data-set-card="${setId}"]`);
+  if (!cardEl) return;
+
+  const grouped = groupBySlotBucket(itemsBySetId[setId], (m) => m.equipment_slot);
+  const selectedSlot = selectedSlotBySetId[setId];
+
+  const dollEl = cardEl.querySelector(".equipment-doll");
+  if (dollEl) dollEl.innerHTML = EQUIPMENT_SLOTS.map((slot) => dollSlotButtonHtml(setId, slot, grouped[slot], slot === selectedSlot)).join("");
+
+  const otherRowEl = cardEl.querySelector(".doll-other-row");
+  if (otherRowEl) otherRowEl.innerHTML = otherRowButtonHtml(setId, grouped.other, selectedSlot === "other");
+
+  const membersEl = cardEl.querySelector(".doll-slot-members");
+  if (membersEl && selectedSlot && selectedSlot !== GLOBAL_SEARCH_SLOT) {
+    membersEl.innerHTML = memberChipsHtml(grouped[selectedSlot] || [], setId);
+  }
 }
 
 function itemSetFormHtml(set) {
@@ -430,7 +459,7 @@ function handleItemSetSearchInput(e) {
 
 async function handleCreateItemSet() {
   const name = itemSetNameInput.value.trim();
-  if (!name) return;
+  if (!name) return showError("Item set needs a name.");
 
   createItemSetBtn.disabled = true;
   try {
@@ -528,12 +557,17 @@ async function handleItemSetsListClick(e) {
     const item = await resolvePickedItem(supabase, result);
     await addItemToSet(supabase, pickSetId, item.id);
     await refreshItemSetMembers(pickSetId);
+    // Removes just this row rather than re-rendering the whole results list
+    // — the search input/results next to it are left alone (see
+    // refreshItemSetMembers), so picking several same-named items in a row
+    // (e.g. "rune sword", "rune platebody") doesn't require retyping.
+    e.target.closest(".checkbox-row")?.remove();
   }
 }
 
 async function handleCreateClan() {
   const displayName = clanNameInput.value.trim();
-  if (!displayName) return;
+  if (!displayName) return showError("Clan needs a name.");
   const prefix = clanPrefixInput.value.trim() || null;
 
   createClanBtn.disabled = true;
@@ -555,7 +589,7 @@ async function handleCreateClan() {
 async function handleCreateEvent() {
   const name = eventNameInput.value.trim();
   const endLocal = eventEndInput.value;
-  if (!name || !endLocal) return;
+  if (!name || !endLocal) return showError(!name ? "Event needs a name." : "Event needs an end time.");
 
   createEventBtn.disabled = true;
   try {

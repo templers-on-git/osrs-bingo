@@ -17,6 +17,33 @@ export function computeBracketBreakdown(tiles, progressByTileId) {
   return [...groups.values()].sort((a, b) => b.points - a.points);
 }
 
+// Difficulty color for a bracket's point value, on a green (easiest) to red
+// (hardest) gradient relative to the event's own min/max bracket points —
+// a fixed color scale wouldn't mean anything across events with very
+// different point ranges. Falls back to green if every bracket in the
+// event has the same points (nothing to compare against).
+export function bracketColor(points, minPoints, maxPoints) {
+  const fraction = maxPoints === minPoints ? 0 : (points - minPoints) / (maxPoints - minPoints);
+  const hue = Math.round(120 * (1 - fraction));
+  return `hsl(${hue}, 65%, 45%)`;
+}
+
+// Player-facing header stat: points earned so far vs. the board's total,
+// and tiles done vs. total tiles — the v1-style always-visible summary.
+export function computeBoardSummary(tiles, progressByTileId) {
+  const totalPoints = tiles.reduce((sum, t) => sum + t.point_brackets.points, 0);
+  const completedTiles = tiles.filter((t) => progressByTileId[t.id]?.completed);
+  const earnedPoints = completedTiles.reduce((sum, t) => sum + t.point_brackets.points, 0);
+
+  return {
+    earnedPoints,
+    totalPoints,
+    completedCount: completedTiles.length,
+    totalCount: tiles.length,
+    percent: totalPoints ? Math.round((earnedPoints / totalPoints) * 100) : 0,
+  };
+}
+
 // completed_at reflects only the most recent completion (tile_progress rows
 // are upserted, not logged) — if a tile is uncompleted then recompleted, its
 // original completion time is lost. Acceptable for a first version of this.

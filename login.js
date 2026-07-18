@@ -24,7 +24,7 @@ import {
 } from "./admin.js";
 import { loadWikiItemIndex, EQUIPMENT_SLOTS, groupBySlotBucket, slotBucketFor } from "./wikiItems.js";
 import { searchPickableItems, resolvePickedItem } from "./itemPicker.js";
-import { computeBracketBreakdown, computePointsOverTime } from "./analytics.js";
+import { computeBracketBreakdown, computePointsOverTime, computeBoardSummary, bracketColor } from "./analytics.js";
 import {
   listClanTileProgress,
   collectItemForTile,
@@ -34,6 +34,11 @@ import {
   incrementTileProgress,
 } from "./tileProgress.js";
 import { signUpForTile, dropTileSignUp, listClanTileSignups } from "./tileSignups.js";
+import { initTheme } from "./theme.js";
+import { showError, installGlobalErrorToasts } from "./errorToast.js";
+
+initTheme(document.getElementById("theme-toggle-btn"));
+installGlobalErrorToasts();
 
 // The 3 tile types whose progress is tracked by collecting individual
 // items (directly, or via item sets for n_sets) rather than a plain counter.
@@ -74,6 +79,9 @@ const breakdownList = document.getElementById("breakdown-list");
 const pointsChart = document.getElementById("points-chart");
 const pointsChartInfo = document.getElementById("points-chart-info");
 const boardGrid = document.getElementById("board-grid");
+const statPoints = document.getElementById("stat-points");
+const statCompleted = document.getElementById("stat-completed");
+const statPercent = document.getElementById("stat-percent");
 const progressTilesList = document.getElementById("progress-tiles-list");
 const viewHideCompletedToggle = document.getElementById("view-hide-completed-toggle");
 const progressHideCompletedToggle = document.getElementById("progress-hide-completed-toggle");
@@ -261,6 +269,22 @@ function buildTileConfig(tileType, { target, itemIds, k, setIds, mode }) {
   return {};
 }
 
+// Message describing what's missing from a just-built tile config, or null
+// if it's fine — complete_once/complete_x_times have nothing to check
+// (buildTileConfig already defaults an empty/invalid target to 1).
+function tileConfigError(tileType, config) {
+  if (tileType === "collect_one_of_each" || tileType === "collect_k_of_y") {
+    if (!config.itemIds.length) return "Pick at least one item for this tile.";
+  }
+  if (tileType === "collect_k_of_y" && config.k > config.itemIds.length) {
+    return `"Collect K" (${config.k}) can't be more than the ${config.itemIds.length} item(s) picked.`;
+  }
+  if (tileType === "n_sets" && !config.setIds.length) {
+    return "Pick at least one item set for this tile.";
+  }
+  return null;
+}
+
 function configSummaryText(tile) {
   if (tile.tile_type === "complete_x_times") return `Target: ${tile.config.target}`;
   if (tile.tile_type === "collect_one_of_each") return `${tile.config.itemIds.length} item(s) required`;
@@ -366,7 +390,7 @@ function tileCardHtml(tile) {
     <div class="tile-card ${progress.completed ? "complete" : signupsFor(tile.id).length ? "claimed" : ""}">
       <div class="tile-top">
         <span class="tile-task">${escapeAttr(tile.name)}</span>
-        <span class="status-badge ${progress.completed ? "done" : "open"}">${progress.completed ? "Done" : "Open"}</span>
+        <span class="status-badge ${progress.completed ? "done" : "open"}">${progress.completed ? "Completed" : "Available"}</span>
       </div>
       <div class="progress-bar"><div class="progress-bar-fill" style="width:${fillPct}%"></div></div>
       ${progressText ? `<span class="progress-info">${progressText}</span>` : ""}
@@ -377,10 +401,12 @@ function tileCardHtml(tile) {
 }
 
 function tileGroupHtml(group, cardHtmlFn) {
+  const bracketPoints = brackets.map((b) => b.points);
+  const color = bracketColor(group.bracket.points, Math.min(...bracketPoints), Math.max(...bracketPoints));
   return `
     <section class="tile-group">
       <h2 class="group-header">
-        <span class="pts-badge generic">${group.bracket.points} pts</span>
+        <span class="pts-badge generic" style="background:${color};color:#fff">${group.bracket.points} pts</span>
         ${escapeAttr(group.bracket.label)}
       </h2>
       <div class="tile-grid">${group.tiles.map(cardHtmlFn).join("")}</div>
@@ -391,7 +417,15 @@ function visibleTiles(hideCompleted) {
   return hideCompleted ? tiles.filter((t) => !progressFor(t.id).completed) : tiles;
 }
 
+function renderBoardSummary() {
+  const summary = computeBoardSummary(tiles, progressByTileId);
+  statPoints.textContent = summary.earnedPoints;
+  statCompleted.textContent = `${summary.completedCount}/${summary.totalCount}`;
+  statPercent.textContent = `${summary.percent}%`;
+}
+
 function renderBoard() {
+  renderBoardSummary();
   const groups = groupTilesByBracket(visibleTiles(hideCompletedView));
   boardGrid.innerHTML = groups.length
     ? groups.map((g) => tileGroupHtml(g, tileCardHtml)).join("")
@@ -546,7 +580,7 @@ function itemSetSearchResultsHtml(results, existingMemberIds, setId, slot) {
 function dollSlotButtonHtml(setId, slot, members, isSelected) {
   const first = members[0];
   return `
-    <button type="button" class="doll-slot ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${slot}" title="${slotLabel(slot)}">
+    <button type="button" class="doll-slot ${members.length ? "occupied" : ""} ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${slot}" title="${slotLabel(slot)}">
       ${first?.photo_url ? `<img src="${escapeAttr(first.photo_url)}" alt="" class="doll-slot-icon" referrerpolicy="no-referrer">` : ""}
       ${members.length > 1 ? `<span class="doll-slot-badge">${members.length}</span>` : ""}
     </button>`;
@@ -581,20 +615,25 @@ function dollDetailPanelHtml(setId, selectedSlot, grouped) {
   return `
     <div class="doll-detail-panel">
       <p class="doll-detail-label">${slotLabel(selectedSlot)}</p>
-      <div class="doll-slot-members">
-        ${members.length
-          ? members.map((m) => `
-            <div class="selected-chip">
-              ${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
-              <span>${escapeAttr(m.name)}${m.equipment_slot === "2h" ? " (2h)" : ""}</span>
-              ${isEventLocked ? "" : `<button class="selected-remove" data-remove-member="${m.id}" data-set-id="${setId}">&times;</button>`}
-            </div>`).join("")
-          : "<p class=\"dev-empty\">Empty</p>"}
-      </div>
+      <div class="doll-slot-members">${memberChipsHtml(members, setId)}</div>
       ${isEventLocked ? "" : `
         <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${selectedSlot}" placeholder="Search ${slotLabel(selectedSlot).toLowerCase()}..." autocomplete="off">
         <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${selectedSlot}"></div>`}
     </div>`;
+}
+
+// Extracted so refreshItemSetMembers can update just the members list after
+// an add/remove, without touching the search input/results next to it (see
+// that function's comment for why).
+function memberChipsHtml(members, setId) {
+  return members.length
+    ? members.map((m) => `
+      <div class="selected-chip">
+        ${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
+        <span>${escapeAttr(m.name)}${m.equipment_slot === "2h" ? " (2h)" : ""}</span>
+        ${isEventLocked ? "" : `<button class="selected-remove" data-remove-member="${m.id}" data-set-id="${setId}">&times;</button>`}
+      </div>`).join("")
+    : "<p class=\"dev-empty\">Empty</p>";
 }
 
 function itemSetManagementCardHtml(set) {
@@ -639,9 +678,30 @@ function rerenderItemSetCard(setId) {
   if (cardEl) cardEl.outerHTML = itemSetManagementCardHtml(set);
 }
 
+// Targeted DOM update (doll icons/badges + members list only) rather than
+// rerenderItemSetCard's full outerHTML replace — that regenerates the
+// search input/results from scratch too, wiping an in-progress query. That
+// made picking several same-named items in a row (e.g. "rune sword", "rune
+// platebody") require retyping the search after every single pick.
 async function refreshItemSetMembers(setId) {
   itemsBySetId[setId] = await listItemsInSet(supabase, setId);
-  rerenderItemSetCard(setId);
+
+  const cardEl = itemSetsManagementList.querySelector(`[data-set-card="${setId}"]`);
+  if (!cardEl) return;
+
+  const grouped = groupBySlotBucket(itemsBySetId[setId], (m) => m.equipment_slot);
+  const selectedSlot = selectedSlotBySetId[setId];
+
+  const dollEl = cardEl.querySelector(".equipment-doll");
+  if (dollEl) dollEl.innerHTML = EQUIPMENT_SLOTS.map((slot) => dollSlotButtonHtml(setId, slot, grouped[slot], slot === selectedSlot)).join("");
+
+  const otherRowEl = cardEl.querySelector(".doll-other-row");
+  if (otherRowEl) otherRowEl.innerHTML = otherRowButtonHtml(setId, grouped.other, selectedSlot === "other");
+
+  const membersEl = cardEl.querySelector(".doll-slot-members");
+  if (membersEl && selectedSlot && selectedSlot !== GLOBAL_SEARCH_SLOT) {
+    membersEl.innerHTML = memberChipsHtml(grouped[selectedSlot] || [], setId);
+  }
 }
 
 function itemSetManagementFormHtml(set) {
@@ -665,7 +725,7 @@ function renderItemSetsManagement() {
 
 async function handleCreateItemSet() {
   const name = itemSetNameInput.value.trim();
-  if (!name) return;
+  if (!name) return showError("Item set needs a name.");
 
   createItemSetBtn.disabled = true;
   try {
@@ -789,6 +849,11 @@ async function handleItemSetsManagementListClick(e) {
     const item = await resolvePickedItem(supabase, result);
     await addItemToSet(supabase, pickSetId, item.id);
     await refreshItemSetMembers(pickSetId);
+    // Removes just this row rather than re-rendering the whole results list
+    // — the search input/results next to it are left alone (see
+    // refreshItemSetMembers), so picking several same-named items in a row
+    // (e.g. "rune sword", "rune platebody") doesn't require retyping.
+    e.target.closest(".checkbox-row")?.remove();
   }
 }
 
@@ -821,7 +886,7 @@ function progressTileCardHtml(tile) {
     <div class="tile-card ${progress.completed ? "complete" : ""}">
       <div class="tile-top">
         <span class="tile-task">${escapeAttr(tile.name)}</span>
-        <span class="status-badge ${progress.completed ? "done" : "open"}">${progress.completed ? "Done" : "Open"}</span>
+        <span class="status-badge ${progress.completed ? "done" : "open"}">${progress.completed ? "Completed" : "Available"}</span>
       </div>
       <div class="progress-bar"><div class="progress-bar-fill" style="width:${fillPct}%"></div></div>
       ${progressText ? `<span class="progress-info">${progressText}</span>` : ""}
@@ -1037,6 +1102,21 @@ function itemChipHtml(item, progress, tileCompleted, interactive) {
     </div>`;
 }
 
+// Mirrors the builder's dollSlotButtonHtml, plus a "collected" class once
+// every member in this slot is marked collected — so a slot reads as done
+// on the doll itself, not just inside its (currently-selected-only) detail
+// panel. Confirmed items (tile fully complete) count as collected too,
+// same as itemChipHtml's own collected check.
+function modalDollSlotButtonHtml(setId, slot, members, isSelected, progress) {
+  const first = members[0];
+  const collected = members.length > 0 && members.every((m) => progress.collectedItemIds.includes(m.id));
+  return `
+    <button type="button" class="doll-slot ${members.length ? "occupied" : ""} ${collected ? "collected" : ""} ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${slot}" title="${slotLabel(slot)}">
+      ${first?.photo_url ? `<img src="${escapeAttr(first.photo_url)}" alt="" class="doll-slot-icon" referrerpolicy="no-referrer">` : ""}
+      ${members.length > 1 ? `<span class="doll-slot-badge">${members.length}</span>` : ""}
+    </button>`;
+}
+
 // Detail panel for the modal's doll — mirrors the builder's
 // dollDetailPanelHtml, but shows collected/confirmed item chips
 // (itemChipHtml, click-to-toggle when interactive) instead of a plain
@@ -1073,7 +1153,7 @@ function renderModalNSets() {
         <h4>${escapeAttr(set?.name ?? "Unknown set")}</h4>
         <div class="doll-layout">
           <div class="equipment-doll">
-            ${EQUIPMENT_SLOTS.map((slot) => dollSlotButtonHtml(setId, slot, grouped[slot], slot === selectedSlot)).join("")}
+            ${EQUIPMENT_SLOTS.map((slot) => modalDollSlotButtonHtml(setId, slot, grouped[slot], slot === selectedSlot, progress)).join("")}
           </div>
           ${modalDollDetailPanelHtml(selectedSlot, grouped, progress, progress.completed, interactive)}
         </div>
@@ -1500,7 +1580,7 @@ async function init() {
 async function handleCreateBracket() {
   const label = bracketLabelInput.value.trim();
   const points = Number(bracketPointsInput.value);
-  if (!label || !points) return;
+  if (!label || !points) return showError(!label ? "Bracket needs a label." : "Bracket needs a positive point value.");
 
   createBracketBtn.disabled = true;
   try {
@@ -1521,7 +1601,7 @@ async function handleBracketsListClick(e) {
         await deleteBracket(supabase, deleteBracketId);
         await loadBoard();
       } catch (err) {
-        alert("Couldn't delete this bracket — make sure no tiles are assigned to it first.");
+        showError("Couldn't delete this bracket — make sure no tiles are assigned to it first.");
       }
     }
     return;
@@ -1546,7 +1626,7 @@ async function handleBracketsListClick(e) {
     const row = e.target.closest("li");
     const label = row.querySelector(".bracket-edit-label").value.trim();
     const points = Number(row.querySelector(".bracket-edit-points").value);
-    if (!label || !points) return;
+    if (!label || !points) return showError(!label ? "Bracket needs a label." : "Bracket needs a positive point value.");
 
     await updateBracket(supabase, saveBracketId, { label, points });
     editingBracketId = null;
@@ -1558,7 +1638,7 @@ async function handleCreateTile() {
   const name = tileNameInput.value.trim();
   const bracketId = tileBracketSelect.value;
   const tileType = tileTypeSelect.value;
-  if (!name || !bracketId) return;
+  if (!name || !bracketId) return showError(!name ? "Tile needs a name." : "Tile needs a point bracket.");
 
   const config = buildTileConfig(tileType, {
     target: tileTargetInput.value,
@@ -1567,6 +1647,8 @@ async function handleCreateTile() {
     setIds: getCheckedValues(tileSetsSelect),
     mode: tileModeSelect.value,
   });
+  const configError = tileConfigError(tileType, config);
+  if (configError) return showError(configError);
 
   createTileBtn.disabled = true;
   try {
@@ -1661,7 +1743,7 @@ async function handleEditTilesListClick(e) {
     const name = card.querySelector(".tile-edit-name").value.trim();
     const bracketId = card.querySelector(".tile-edit-bracket").value;
     const tileType = card.querySelector(".tile-edit-type").value;
-    if (!name || !bracketId) return;
+    if (!name || !bracketId) return showError(!name ? "Tile needs a name." : "Tile needs a point bracket.");
 
     const config = buildTileConfig(tileType, {
       target: card.querySelector(".tile-edit-target").value,
@@ -1670,6 +1752,8 @@ async function handleEditTilesListClick(e) {
       setIds: getCheckedValues(card.querySelector(".tile-edit-sets")),
       mode: card.querySelector(".tile-edit-mode").value,
     });
+    const configError = tileConfigError(tileType, config);
+    if (configError) return showError(configError);
 
     await updateTile(supabase, saveTileId, { name, bracketId, tileType, config });
     editingTileId = null;
@@ -1710,12 +1794,16 @@ passwordInput.addEventListener("keydown", (e) => {
 });
 logoutBtn.addEventListener("click", handleLogout);
 
-viewHideCompletedToggle.addEventListener("change", () => {
-  hideCompletedView = viewHideCompletedToggle.checked;
+viewHideCompletedToggle.addEventListener("click", () => {
+  hideCompletedView = !hideCompletedView;
+  viewHideCompletedToggle.classList.toggle("active", hideCompletedView);
+  viewHideCompletedToggle.textContent = hideCompletedView ? "Show completed tiles" : "Hide completed tiles";
   renderBoard();
 });
-progressHideCompletedToggle.addEventListener("change", () => {
-  hideCompletedProgress = progressHideCompletedToggle.checked;
+progressHideCompletedToggle.addEventListener("click", () => {
+  hideCompletedProgress = !hideCompletedProgress;
+  progressHideCompletedToggle.classList.toggle("active", hideCompletedProgress);
+  progressHideCompletedToggle.textContent = hideCompletedProgress ? "Show completed tiles" : "Hide completed tiles";
   renderProgressTiles();
 });
 

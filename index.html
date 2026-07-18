@@ -5,8 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TOA Bingo Tracker</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    (function () {
+      var t = localStorage.getItem("bingo-theme");
+      if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
 </head>
 <body>
+
+  <button id="theme-toggle-btn" class="theme-toggle" title="Toggle dark/light theme"></button>
 
   <!-- Name Entry Screen -->
   <div id="name-screen">
