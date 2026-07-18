@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TOA Bingo Tracker</title>
+  <!-- ?v= busts the browser's HTTP cache for this file specifically — bump
+       it whenever style.css or app.js changes. No build step in this repo
+       to do this automatically (see project CLAUDE.md), so it's manual. -->
+  <link rel="stylesheet" href="style.css?v=1">
+  <script>
+    (function () {
+      var t = localStorage.getItem("bingo-theme");
+      if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
+</head>
+<body>
+
+  <button id="theme-toggle-btn" class="theme-toggle" title="Toggle dark/light theme"></button>
+
+  <!-- Name Entry Screen -->
+  <div id="name-screen">
+    <div class="name-card">
+      <div class="logo">⚔️</div>
+      <h1>TOA Bingo</h1>
+      <p>Enter your RSN to get started</p>
+      <input type="text" id="name-input" placeholder="Your RuneScape name" maxlength="12" autocomplete="off">
+      <button id="name-btn">Let's Go</button>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="app" class="hidden">
+    <header>
+      <h1>⚔️ TOA Bingo</h1>
+      <div class="stats-bar">
+        <div class="stat">
+          <span class="stat-label">Points</span>
+          <span class="stat-value" id="stat-points">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Tiles Done</span>
+          <span class="stat-value" id="stat-completed">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Progress</span>
+          <span class="stat-value" id="stat-percent">—</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="playing-as">Playing as <strong id="username-display"></strong></span>
+        <button class="btn-ghost" id="change-name-btn">Change</button>
+        <button class="btn-ghost" id="toggle-completed-btn">Hide Completed</button>
+        <span class="refresh-info" id="refresh-info">Loading...</span>
+      </div>
+    </header>
+
+    <main id="tiles-container"></main>
+  </div>
+
+  <script type="module" src="app.js?v=1"></script>
+</body>
+</html>
