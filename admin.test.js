@@ -16,6 +16,7 @@ import {
   updateClan,
   regenerateClanPassword,
   elevateToDev,
+  actAsClan,
   createBracket,
   listBrackets,
   updateBracket,
@@ -780,6 +781,38 @@ describe("elevateToDev", () => {
     const fakeSupabase = { functions: { invoke }, auth: { refreshSession } };
 
     await expect(elevateToDev(fakeSupabase, "wrong-password")).rejects.toThrow();
+    expect(refreshSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("actAsClan", () => {
+  it("calls act-as-clan with the dev token as a header, refreshes the session, and returns the clan name", async () => {
+    const invoke = vi.fn().mockResolvedValue({ data: { clanDisplayName: "Test1" }, error: null });
+    const refreshSession = vi.fn().mockResolvedValue({ data: {}, error: null });
+    const fakeSupabase = { functions: { invoke }, auth: { refreshSession } };
+
+    const result = await actAsClan(fakeSupabase, {
+      clanId: "clan-1",
+      eventId: "event-1",
+      devAccessToken: "dev-token-abc",
+    });
+
+    expect(invoke).toHaveBeenCalledWith("act-as-clan", {
+      body: { clanId: "clan-1", eventId: "event-1" },
+      headers: { "X-Dev-Authorization": "Bearer dev-token-abc" },
+    });
+    expect(refreshSession).toHaveBeenCalled();
+    expect(result).toEqual({ clanDisplayName: "Test1" });
+  });
+
+  it("throws and does not refresh the session when the caller isn't a valid dev", async () => {
+    const invoke = vi.fn().mockResolvedValue({ data: null, error: { message: "dev session required" } });
+    const refreshSession = vi.fn();
+    const fakeSupabase = { functions: { invoke }, auth: { refreshSession } };
+
+    await expect(
+      actAsClan(fakeSupabase, { clanId: "clan-1", eventId: "event-1", devAccessToken: "not-a-dev" })
+    ).rejects.toThrow();
     expect(refreshSession).not.toHaveBeenCalled();
   });
 });

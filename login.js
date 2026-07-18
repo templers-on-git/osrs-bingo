@@ -20,6 +20,7 @@ import {
   addItemToSet,
   removeItemFromSet,
   getClanLeaderboard,
+  actAsClan,
 } from "./admin.js";
 import { loadWikiItemIndex, EQUIPMENT_SLOTS, groupBySlotBucket, slotBucketFor } from "./wikiItems.js";
 import { searchPickableItems, resolvePickedItem } from "./itemPicker.js";
@@ -41,7 +42,10 @@ const ITEM_BASED_TYPES = ["collect_one_of_each", "collect_k_of_y", "n_sets"];
 const SUPABASE_URL = "https://swqaheqhglqtolzbtgfe.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_MSHvLGLg1hKI7BdqGtAP-Q_biIwaDUL";
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+// Reassigned in setUpActingAsSession() when this tab is a Dev "Act as
+// Admin" tab — swapped to a dedicated, sessionStorage-scoped client so this
+// tab's identity is fully independent of whatever any other tab is doing.
+let supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
 const loginScreen = document.getElementById("name-screen");
 const loggedInScreen = document.getElementById("loggedin-screen");
@@ -113,12 +117,6 @@ const itemSetsManagementList = document.getElementById("item-sets-management-lis
 let currentClanId = null;
 let currentEventId = null;
 let currentIgn = null;
-// Set only when a Dev opened this page via dev.html's "Act as Admin" link
-// (login.html?actAsClan=<id>&actAsEvent=<id>) — overrides the clan/event
-// that would otherwise come from the session's own app_metadata, which for
-// a pure Dev session has no clan_id/event_id at all. See loadBoard().
-let actingAsDevClanId = null;
-let actingAsDevEventId = null;
 let tiles = [];
 let brackets = [];
 let resolvedItemsById = {}; // items.id -> row, populated for every item id referenced by a currently-loaded tile
@@ -151,8 +149,20 @@ let currentEventStartTime = null;
 let currentEventEndTime = null;
 let editingTileId = null; // tile currently showing its inline edit form, if any
 let editingBracketId = null; // bracket currently showing its inline edit form, if any
+
+// Item/set viewer modal (n_sets tiles only — see openItemModal): cached
+// { set, setId, members } per referenced set so clicking a doll slot to
+// select it can re-render without refetching, plus which slot (if any) is
+// currently selected per set. Kept separate from the Edit tab's own
+// selectedSlotBySetId (admin set-builder) so viewing a set here never
+// interferes with that set's builder state, even though both key by the
+// same set ids.
+let currentModalSections = [];
+let modalSelectedSlotBySetId = {};
 let itemsBySetId = {}; // set id -> array of item rows currently in that set (admin Item Sets section)
 let editingItemSetId = null; // item set currently showing its inline rename form, if any
+let expandedSetIds = new Set(); // opt-in: sets currently showing their doll (default collapsed, name only)
+let selectedSlotBySetId = {}; // set id -> the doll slot (or "other") currently shown in that set's detail panel, if any
 let itemSetSearchResultsBySetId = {}; // last search results per (set id, doll slot) - { [setId]: { [slot]: results } }
 let itemSetSearchDebounceTimer = null;
 let isEventLocked = false; // event has started -> item_sets management is Dev-only (RLS-enforced; this just drives the UI)
@@ -502,24 +512,75 @@ function slotLabel(slot) {
   return slot === "other" ? "Other (non-equipment)" : slot[0].toUpperCase() + slot.slice(1);
 }
 
+// Sentinel "slot" for the global search button (GearScape-style) — see
+// dev.js's identical constant for the full reasoning (auto-placement is
+// free since slot is always derived from the item's own equipment_slot,
+// never stored on item_set_members).
+const GLOBAL_SEARCH_SLOT = "__all__";
+
+function globalSearchButtonHtml(setId, isSelected) {
+  return `
+    <button type="button" class="btn-ghost doll-global-search-btn ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${GLOBAL_SEARCH_SLOT}" title="Search all items — picks land in the right slot automatically">
+      🔍 Search all
+    </button>`;
+}
+
 function itemSetSearchResultsHtml(results, existingMemberIds, setId, slot) {
   const visible = results.filter((r) => !(r.source === "local" && existingMemberIds.includes(r.id)));
   if (!visible.length) return "<p class=\"dev-empty\">No matches</p>";
-  return visible.map((r, i) => `
+  return visible.map((r, i) => {
+    const slotBadge = slot === GLOBAL_SEARCH_SLOT ? ` <em>(${slotLabel(slotBucketFor(r.equipmentSlot))})</em>` : "";
+    return `
     <div class="checkbox-row">
       ${r.photoUrl ? `<img src="${escapeAttr(r.photoUrl)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
-      <span>${escapeAttr(r.name)}${r.equipmentSlot === "2h" ? " (2h)" : ""}${r.source === "wiki" ? " <em>(from wiki)</em>" : ""}</span>
+      <span>${escapeAttr(r.name)}${r.equipmentSlot === "2h" ? " (2h)" : ""}${slotBadge}${r.source === "wiki" ? " <em>(from wiki)</em>" : ""}</span>
       <button class="btn-ghost" data-pick-result-index="${i}" data-pick-set-id="${escapeAttr(setId)}" data-pick-slot="${slot}">Add</button>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
-// One equipment-doll cell — mirrors dev.js's dollSlotHtml, plus isEventLocked
-// gating (no search box or remove buttons once the admin's event has
-// started; see renderItemSetsManagement's note above).
-function dollSlotHtml(setId, slot, members, extraClass = "") {
+// One compact doll cell — mirrors dev.js's dollSlotButtonHtml. Locking
+// doesn't affect the cells themselves (an admin can still browse a locked
+// set's contents), only the detail panel's edit controls (see
+// dollDetailPanelHtml below).
+function dollSlotButtonHtml(setId, slot, members, isSelected) {
+  const first = members[0];
   return `
-    <div class="doll-slot ${extraClass}" data-slot="${slot}">
-      <p class="doll-slot-label">${slotLabel(slot)}</p>
+    <button type="button" class="doll-slot ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${slot}" title="${slotLabel(slot)}">
+      ${first?.photo_url ? `<img src="${escapeAttr(first.photo_url)}" alt="" class="doll-slot-icon" referrerpolicy="no-referrer">` : ""}
+      ${members.length > 1 ? `<span class="doll-slot-badge">${members.length}</span>` : ""}
+    </button>`;
+}
+
+function otherRowButtonHtml(setId, members, isSelected) {
+  return `
+    <button type="button" class="doll-other-btn ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="other">
+      ${slotLabel("other")}${members.length ? ` (${members.length})` : ""}
+    </button>`;
+}
+
+// Mirrors dev.js's dollDetailPanelHtml, plus isEventLocked gating (no
+// remove buttons or search box once the admin's event has started —
+// viewing what's already in the slot still works either way).
+function dollDetailPanelHtml(setId, selectedSlot, grouped) {
+  if (!selectedSlot) {
+    return `<div class="doll-detail-panel"><p class="dev-empty">Click a slot to view or search items.</p></div>`;
+  }
+
+  if (selectedSlot === GLOBAL_SEARCH_SLOT) {
+    if (isEventLocked) return `<div class="doll-detail-panel"><p class="dev-empty">Locked — event has started.</p></div>`;
+    return `
+      <div class="doll-detail-panel">
+        <p class="doll-detail-label">Search all items</p>
+        <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${GLOBAL_SEARCH_SLOT}" placeholder="Search any item..." autocomplete="off">
+        <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${GLOBAL_SEARCH_SLOT}"></div>
+      </div>`;
+  }
+
+  const members = grouped[selectedSlot] || [];
+  return `
+    <div class="doll-detail-panel">
+      <p class="doll-detail-label">${slotLabel(selectedSlot)}</p>
       <div class="doll-slot-members">
         ${members.length
           ? members.map((m) => `
@@ -531,30 +592,56 @@ function dollSlotHtml(setId, slot, members, extraClass = "") {
           : "<p class=\"dev-empty\">Empty</p>"}
       </div>
       ${isEventLocked ? "" : `
-        <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${slot}" placeholder="Search ${slotLabel(slot).toLowerCase()}..." autocomplete="off">
-        <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${slot}"></div>`}
+        <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${selectedSlot}" placeholder="Search ${slotLabel(selectedSlot).toLowerCase()}..." autocomplete="off">
+        <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${selectedSlot}"></div>`}
     </div>`;
 }
 
 function itemSetManagementCardHtml(set) {
   if (set.id === editingItemSetId) return itemSetManagementFormHtml(set);
 
+  const isExpanded = expandedSetIds.has(set.id);
   const members = itemsBySetId[set.id] || [];
   const grouped = groupBySlotBucket(members, (m) => m.equipment_slot);
+  const selectedSlot = selectedSlotBySetId[set.id];
 
   return `
-    <div class="dev-event-card">
+    <div class="dev-event-card" data-set-card="${set.id}">
       <h3>
+        <button class="btn-ghost doll-collapse-toggle" data-toggle-expand="${set.id}">${isExpanded ? "▾" : "▸"}</button>
         ${escapeAttr(set.name)}
         ${isEventLocked ? "" : `
           <button class="btn-ghost" data-edit-item-set="${set.id}">Rename</button>
           <button class="btn-ghost" data-delete-item-set="${set.id}">Delete</button>`}
       </h3>
-      <div class="equipment-doll">
-        ${EQUIPMENT_SLOTS.map((slot) => dollSlotHtml(set.id, slot, grouped[slot])).join("")}
-      </div>
-      ${dollSlotHtml(set.id, "other", grouped.other, "doll-slot-other")}
+      ${isExpanded ? `
+        ${isEventLocked ? "" : globalSearchButtonHtml(set.id, selectedSlot === GLOBAL_SEARCH_SLOT)}
+        <div class="doll-layout">
+          <div class="equipment-doll">
+            ${EQUIPMENT_SLOTS.map((slot) => dollSlotButtonHtml(set.id, slot, grouped[slot], slot === selectedSlot)).join("")}
+          </div>
+          ${dollDetailPanelHtml(set.id, selectedSlot, grouped)}
+        </div>
+        <div class="doll-other-row">
+          ${otherRowButtonHtml(set.id, grouped.other, selectedSlot === "other")}
+        </div>` : ""}
     </div>`;
+}
+
+// Same reasoning as dev.js's identical helper: never call
+// renderItemSetsManagement() for expand/collapse or add/remove-member —
+// that rebuilds every OTHER expanded set's <img> elements too, which is
+// what caused the sluggishness/"pictures break" symptom.
+function rerenderItemSetCard(setId) {
+  const set = itemSets.find((s) => s.id === setId);
+  if (!set) return;
+  const cardEl = itemSetsManagementList.querySelector(`[data-set-card="${setId}"]`);
+  if (cardEl) cardEl.outerHTML = itemSetManagementCardHtml(set);
+}
+
+async function refreshItemSetMembers(setId) {
+  itemsBySetId[setId] = await listItemsInSet(supabase, setId);
+  rerenderItemSetCard(setId);
 }
 
 function itemSetManagementFormHtml(set) {
@@ -615,13 +702,40 @@ function handleItemSetSearchInput(e) {
     if (itemSetsManagementList.querySelector(`.item-set-add-search[data-set-id="${setId}"][data-slot="${slot}"]`)?.value !== query) return;
 
     const allResults = await searchPickableItems(supabase, wikiIndex, query);
-    const results = allResults.filter((r) => slotBucketFor(r.equipmentSlot) === slot);
+    const results = slot === GLOBAL_SEARCH_SLOT ? allResults : allResults.filter((r) => slotBucketFor(r.equipmentSlot) === slot);
     itemSetSearchResultsBySetId[setId][slot] = results;
     resultsEl.innerHTML = itemSetSearchResultsHtml(results, (itemsBySetId[setId] || []).map((m) => m.id), setId, slot);
   }, 250);
 }
 
 async function handleItemSetsManagementListClick(e) {
+  const toggleExpandId = e.target.dataset.toggleExpand;
+  if (toggleExpandId) {
+    if (expandedSetIds.has(toggleExpandId)) expandedSetIds.delete(toggleExpandId);
+    else expandedSetIds.add(toggleExpandId);
+    rerenderItemSetCard(toggleExpandId);
+    return;
+  }
+
+  // Pure DOM surgery, not even rerenderItemSetCard — see dev.js's identical
+  // handler for why (avoids recreating the doll's own <img> elements just
+  // to browse between slots).
+  const selectSlotBtn = e.target.closest("[data-select-slot]");
+  if (selectSlotBtn) {
+    const setId = selectSlotBtn.dataset.selectSlot;
+    const slot = selectSlotBtn.dataset.slot;
+    const newSlot = selectedSlotBySetId[setId] === slot ? null : slot;
+    selectedSlotBySetId[setId] = newSlot;
+
+    const card = selectSlotBtn.closest("[data-set-card]");
+    card.querySelectorAll("[data-select-slot].active").forEach((btn) => btn.classList.remove("active"));
+    if (newSlot) card.querySelector(`[data-select-slot="${setId}"][data-slot="${newSlot}"]`)?.classList.add("active");
+
+    const grouped = groupBySlotBucket(itemsBySetId[setId] || [], (m) => m.equipment_slot);
+    card.querySelector(".doll-detail-panel").outerHTML = dollDetailPanelHtml(setId, newSlot, grouped);
+    return;
+  }
+
   const deleteSetId = e.target.dataset.deleteItemSet;
   if (deleteSetId) {
     if (confirm("Delete this item set? Any tiles referencing it will need to be updated separately.")) {
@@ -661,7 +775,7 @@ async function handleItemSetsManagementListClick(e) {
   if (removeMemberItemId) {
     const setId = e.target.dataset.setId;
     await removeItemFromSet(supabase, setId, removeMemberItemId);
-    await loadBoard();
+    await refreshItemSetMembers(setId); // not loadBoard() — that's a full board refetch (tiles/brackets/progress/...) for a single set's membership change
     return;
   }
 
@@ -674,7 +788,7 @@ async function handleItemSetsManagementListClick(e) {
     e.target.disabled = true;
     const item = await resolvePickedItem(supabase, result);
     await addItemToSet(supabase, pickSetId, item.id);
-    await loadBoard();
+    await refreshItemSetMembers(pickSetId);
   }
 }
 
@@ -923,6 +1037,53 @@ function itemChipHtml(item, progress, tileCompleted, interactive) {
     </div>`;
 }
 
+// Detail panel for the modal's doll — mirrors the builder's
+// dollDetailPanelHtml, but shows collected/confirmed item chips
+// (itemChipHtml, click-to-toggle when interactive) instead of a plain
+// member list with remove buttons, since this is a progress viewer, not
+// an editor.
+function modalDollDetailPanelHtml(selectedSlot, grouped, progress, tileCompleted, interactive) {
+  if (!selectedSlot) {
+    return `<div class="doll-detail-panel"><p class="dev-empty">Click a slot to view items.</p></div>`;
+  }
+
+  const members = grouped[selectedSlot] || [];
+  return `
+    <div class="doll-detail-panel">
+      <p class="doll-detail-label">${slotLabel(selectedSlot)}</p>
+      <div class="item-chip-grid">
+        ${members.length ? members.map((m) => itemChipHtml(m, progress, tileCompleted, interactive)).join("") : "<p class=\"dev-empty\">Empty</p>"}
+      </div>
+    </div>`;
+}
+
+// Renders currentModalSections into the doll layout — separated from
+// openItemModal so selecting a doll slot (modalSelectedSlotBySetId) can
+// re-render without refetching set membership from the DB every click.
+function renderModalNSets() {
+  const tileId = itemModalOverlay.dataset.tileId;
+  const interactive = itemModalOverlay.dataset.interactive === "true";
+  const progress = progressFor(tileId);
+
+  itemModalBody.innerHTML = currentModalSections.map(({ set, setId, members }) => {
+    const grouped = groupBySlotBucket(members, (m) => m.equipment_slot);
+    const selectedSlot = modalSelectedSlotBySetId[setId];
+    return `
+      <div class="modal-set-group" data-set-card="${setId}">
+        <h4>${escapeAttr(set?.name ?? "Unknown set")}</h4>
+        <div class="doll-layout">
+          <div class="equipment-doll">
+            ${EQUIPMENT_SLOTS.map((slot) => dollSlotButtonHtml(setId, slot, grouped[slot], slot === selectedSlot)).join("")}
+          </div>
+          ${modalDollDetailPanelHtml(selectedSlot, grouped, progress, progress.completed, interactive)}
+        </div>
+        <div class="doll-other-row">
+          ${otherRowButtonHtml(setId, grouped.other, selectedSlot === "other")}
+        </div>
+      </div>`;
+  }).join("");
+}
+
 async function openItemModal(tileId, interactive) {
   const tile = tiles.find((t) => t.id === tileId);
   if (!tile) return;
@@ -933,17 +1094,14 @@ async function openItemModal(tileId, interactive) {
   itemModalOverlay.dataset.interactive = interactive ? "true" : "false";
 
   if (tile.tile_type === "n_sets") {
-    const sections = await Promise.all(tile.config.setIds.map(async (setId) => {
+    currentModalSections = await Promise.all(tile.config.setIds.map(async (setId) => {
       const set = itemSets.find((s) => s.id === setId);
       const members = await listItemsInSet(supabase, setId);
-      return { set, members };
+      return { set, setId, members };
     }));
-    itemModalBody.innerHTML = sections.map(({ set, members }) => `
-      <div class="modal-set-group">
-        <h4>${escapeAttr(set?.name ?? "Unknown set")}</h4>
-        <div class="item-chip-grid">${members.map((m) => itemChipHtml(m, progress, progress.completed, interactive)).join("")}</div>
-      </div>`).join("");
+    renderModalNSets();
   } else {
+    currentModalSections = [];
     const members = tile.config.itemIds.map((id) => resolvedItemsById[id]).filter(Boolean);
     itemModalBody.innerHTML = `<div class="item-chip-grid">${members.map((m) => itemChipHtml(m, progress, progress.completed, interactive)).join("")}</div>`;
   }
@@ -956,6 +1114,32 @@ function closeItemModal() {
 }
 
 async function handleItemChipClick(e) {
+  // Doll slot selection works in both read-only (View) and interactive
+  // (Progress) modes — only actually toggling an item's collected state is
+  // gated by interactive, below.
+  // Pure DOM surgery, not renderModalNSets() — same reasoning as the
+  // builder's identical handler (avoids recreating every set section's
+  // <img> elements just to browse between slots).
+  const selectSlotBtn = e.target.closest("[data-select-slot]");
+  if (selectSlotBtn) {
+    const setId = selectSlotBtn.dataset.selectSlot;
+    const slot = selectSlotBtn.dataset.slot;
+    const newSlot = modalSelectedSlotBySetId[setId] === slot ? null : slot;
+    modalSelectedSlotBySetId[setId] = newSlot;
+
+    const group = selectSlotBtn.closest("[data-set-card]");
+    group.querySelectorAll("[data-select-slot].active").forEach((btn) => btn.classList.remove("active"));
+    if (newSlot) group.querySelector(`[data-select-slot="${setId}"][data-slot="${newSlot}"]`)?.classList.add("active");
+
+    const tileId = itemModalOverlay.dataset.tileId;
+    const interactive = itemModalOverlay.dataset.interactive === "true";
+    const progress = progressFor(tileId);
+    const { members } = currentModalSections.find((s) => s.setId === setId) ?? { members: [] };
+    const grouped = groupBySlotBucket(members, (m) => m.equipment_slot);
+    group.querySelector(".doll-detail-panel").outerHTML = modalDollDetailPanelHtml(newSlot, grouped, progress, progress.completed, interactive);
+    return;
+  }
+
   if (itemModalOverlay.dataset.interactive !== "true") return;
   const chip = e.target.closest("[data-toggle-item]");
   if (!chip) return;
@@ -1141,8 +1325,7 @@ function setViewMode(mode) {
 
 async function loadBoard() {
   const { data: { session } } = await supabase.auth.getSession();
-  const clan_id = actingAsDevClanId ?? session.user.app_metadata.clan_id;
-  const event_id = actingAsDevEventId ?? session.user.app_metadata.event_id;
+  const { clan_id, event_id } = session.user.app_metadata;
   currentClanId = clan_id;
   currentEventId = event_id;
 
@@ -1187,6 +1370,16 @@ async function loadBoard() {
 
   const ownClan = eventClans.find((c) => c.clanId === clan_id);
   eventClanDisplay.textContent = ownClan ? `${event.name} — ${ownClan.displayName}` : event.name;
+
+  // "The Dev" ign is only ever set by the act-as-clan Edge Function (see
+  // setUpActingAsSession) — deriving the banner from the session itself
+  // (rather than a one-shot variable set only at setup time) means it stays
+  // correct across a plain page reload too, which just resumes this tab's
+  // existing sessionStorage session without re-running setup.
+  const actingAsDev = session.user.app_metadata.ign === "The Dev";
+  actingAsBanner.classList.toggle("hidden", !actingAsDev);
+  logoutBtn.classList.toggle("hidden", actingAsDev); // signing out here would end the Dev's session in every tab, not just this one
+  if (actingAsDev) actingAsClanName.textContent = ownClan?.displayName ?? "this clan";
 
   renderBoard();
   renderBrackets();
@@ -1235,23 +1428,65 @@ async function handleLogout() {
   showLogin();
 }
 
-async function init() {
-  const { data: { session } } = await supabase.auth.getSession();
+// Gives this tab its own independent anonymous session (sessionStorage,
+// not the shared localStorage session every other tab uses) and asks the
+// act-as-clan Edge Function to turn it into clanId's Admin — verified
+// server-side against the *caller* tab's own already-elevated Dev session
+// (devSession, read from a throwaway localStorage-backed client so this
+// tab's own sessionStorage client is never mixed up with it). Returns false
+// (caller should fall back to the login screen) if the caller isn't
+// actually a Dev or the clan/event lookup fails.
+async function setUpActingAsSession(clanId, eventId) {
+  const localStorageClient = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+  const { data: { session: devSession } } = await localStorageClient.auth.getSession();
+  if (!devSession?.user?.app_metadata?.is_dev) return false;
 
-  const params = new URLSearchParams(location.search);
-  const actAsClan = params.get("actAsClan");
-  const actAsEvent = params.get("actAsEvent");
-  if (session?.user?.app_metadata?.is_dev && actAsClan && actAsEvent) {
-    actingAsDevClanId = actAsClan;
-    actingAsDevEventId = actAsEvent;
-    actingAsClanName.textContent = params.get("actAsLabel") ?? "this clan";
-    actingAsBanner.classList.remove("hidden");
-    logoutBtn.classList.add("hidden"); // signing out here would end the Dev's session in every tab, not just this one
-    showLoggedIn("Dev", "admin");
-    await loadBoard();
-    return;
+  if (!(await supabase.auth.getSession()).data.session) {
+    const { error: signInError } = await supabase.auth.signInAnonymously();
+    if (signInError) return false;
   }
 
+  try {
+    await actAsClan(supabase, { clanId, eventId, devAccessToken: devSession.access_token });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function init() {
+  const params = new URLSearchParams(location.search);
+  const actAsClanId = params.get("actAsClan");
+  const actAsEventId = params.get("actAsEvent");
+
+  if (actAsClanId && actAsEventId) {
+    // Tab-scoped from here on — never falls back to the shared localStorage
+    // client again, so nothing another tab does can affect this one.
+    supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+      auth: { storage: window.sessionStorage },
+    });
+
+    const { data: { session: existing } } = await supabase.auth.getSession();
+    const alreadyActingAsThisClan = existing?.user?.app_metadata?.clan_id === actAsClanId
+      && existing?.user?.app_metadata?.event_id === actAsEventId;
+
+    // A plain reload of this tab lands here again — if it already went
+    // through setup once (this tab's own sessionStorage session already
+    // matches the requested clan/event), just resume it instead of
+    // re-verifying Dev-ness against whatever's *currently* in the shared
+    // localStorage, which may have changed since this tab was first opened.
+    if (!alreadyActingAsThisClan) {
+      const ok = await setUpActingAsSession(actAsClanId, actAsEventId);
+      if (!ok) {
+        showLogin();
+        loginError.textContent = "Couldn't act as that clan — open a fresh \"Act as Admin\" link from the Dev dashboard.";
+        loginError.classList.remove("hidden");
+        return;
+      }
+    }
+  }
+
+  const { data: { session } } = await supabase.auth.getSession();
   const clanRole = session?.user?.app_metadata?.clan_role;
   const ign = session?.user?.app_metadata?.ign;
   if (clanRole) {

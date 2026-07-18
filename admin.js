@@ -290,3 +290,21 @@ export async function elevateToDev(supabase, password) {
   const { error: refreshError } = await supabase.auth.refreshSession();
   if (refreshError) throw refreshError;
 }
+
+// `supabase` here must already be signed in as the *new*, tab-scoped
+// session being turned into "clan X's admin" — devAccessToken is a
+// separate proof, the access token of the caller's own already-elevated
+// Dev session, so the edge function can verify a real Dev is behind this
+// without that Dev's own session ever being touched.
+export async function actAsClan(supabase, { clanId, eventId, devAccessToken }) {
+  const { data, error } = await supabase.functions.invoke("act-as-clan", {
+    body: { clanId, eventId },
+    headers: { "X-Dev-Authorization": `Bearer ${devAccessToken}` },
+  });
+  if (error) throw error;
+
+  const { error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError) throw refreshError;
+
+  return data;
+}
