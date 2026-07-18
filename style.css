@@ -1,5 +1,6 @@
 :root {
   --bg: #0f1117;
+  --bg-gradient-start: #1a1d2e;
   --surface: #1a1d27;
   --surface2: #22263a;
   --gold: #c8a951;
@@ -7,11 +8,57 @@
   --text: #e8e8e8;
   --text-muted: #8a8a9a;
   --border: #2a2d3f;
+  --border-hover: #4a4d60;
+  --text-on-gold: #0f1117;
   --complete-bg: #132013;
   --complete-border: #2d6b2d;
   --complete-text: #6dba6d;
   --claimed-bg: #231d0c;
   --claimed-border: #7a5c10;
+  --status-done-bg: #1a4a1a;
+  --status-active-bg: #3d2c08;
+  --status-active-text: #e8b840;
+  --status-open-bg: #1e2032;
+  --claimant-me-bg: #162616;
+  --claimant-me-border: #3a6a3a;
+  --unclaim-bg: #3a1f1f;
+  --unclaim-text: #e07070;
+  --unclaim-border: #5a2f2f;
+  --unclaim-hover-bg: #4a2020;
+  --error-text: #d96a6a;
+}
+
+/* Light theme: overrides the same custom properties above rather than a
+   parallel selector for every rule, so every var(...) usage in this file
+   flips automatically. Toggled by setting data-theme on <html> (theme.js). */
+:root[data-theme="light"] {
+  --bg: #f4f1ea;
+  --bg-gradient-start: #ffffff;
+  --surface: #ffffff;
+  --surface2: #eeeae0;
+  --gold: #a8792e;
+  --gold-light: #8a611f;
+  --text: #24221c;
+  --text-muted: #6b6659;
+  --border: #d8d2c2;
+  --border-hover: #b8b09a;
+  --text-on-gold: #fffaf0;
+  --complete-bg: #e3f0e3;
+  --complete-border: #7fbf7f;
+  --complete-text: #2d6b2d;
+  --claimed-bg: #f6ecd2;
+  --claimed-border: #c9a54a;
+  --status-done-bg: #cdeacd;
+  --status-active-bg: #f6e2b0;
+  --status-active-text: #8a5a06;
+  --status-open-bg: #e4e1d6;
+  --claimant-me-bg: #d7ecd7;
+  --claimant-me-border: #5a9a5a;
+  --unclaim-bg: #f6dede;
+  --unclaim-text: #a13a3a;
+  --unclaim-border: #d9a3a3;
+  --unclaim-hover-bg: #f0cccc;
+  --error-text: #b23a3a;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -25,13 +72,69 @@ body {
 
 .hidden { display: none !important; }
 
+.theme-toggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 200;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s;
+}
+
+.theme-toggle:hover { border-color: var(--gold); }
+
+.error-toast-container {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  max-width: 90vw;
+}
+
+.error-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--unclaim-bg);
+  border: 1px solid var(--unclaim-border);
+  color: var(--unclaim-text);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.error-toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+
 /* ── Name Screen ── */
 #name-screen {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: radial-gradient(ellipse at center, #1a1d2e 0%, #0f1117 70%);
+  background: radial-gradient(ellipse at center, var(--bg-gradient-start) 0%, var(--bg) 70%);
 }
 
 .name-card {
@@ -78,7 +181,7 @@ body {
   width: 100%;
   padding: 13px;
   background: var(--gold);
-  color: #0f1117;
+  color: var(--text-on-gold);
   border: none;
   border-radius: 8px;
   font-size: 16px;
@@ -89,7 +192,19 @@ body {
 
 #name-btn:hover { background: var(--gold-light); }
 
-.error-text { color: #d96a6a; font-size: 14px; margin-top: 12px; }
+.error-text { color: var(--error-text); font-size: 14px; margin-top: 12px; }
+
+.acting-as-banner {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: #d9a441;
+  color: #1a1a1a;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 12px;
+}
 
 /* Class variants of #name-input/#name-btn above, for pages needing more
    than one input (e.g. login.html's ign + password) where a single shared
@@ -113,7 +228,7 @@ body {
   width: 100%;
   padding: 13px;
   background: var(--gold);
-  color: #0f1117;
+  color: var(--text-on-gold);
   border: none;
   border-radius: 8px;
   font-size: 16px;
@@ -242,7 +357,7 @@ main {
 .dev-form button {
   padding: 10px 16px;
   background: var(--gold);
-  color: #0f1117;
+  color: var(--text-on-gold);
   border: none;
   border-radius: 8px;
   font-weight: 700;
@@ -326,10 +441,10 @@ main {
 
 .pts-5 { background: #c0392b; color: #fff; }
 .pts-4 { background: #c0672b; color: #fff; }
-.pts-3 { background: #b8961a; color: #0f1117; }
+.pts-3 { background: #b8961a; color: var(--text-on-gold); }
 .pts-2 { background: #2980b9; color: #fff; }
 .pts-1 { background: #555570; color: #fff; }
-.pts-badge.generic { background: var(--gold); color: #0f1117; }
+.pts-badge.generic { background: var(--gold); color: var(--text-on-gold); }
 
 .btn-ghost.active { border-color: var(--gold); color: var(--gold); }
 
@@ -392,6 +507,42 @@ main {
   cursor: pointer;
 }
 
+.hide-completed-toggle {
+  margin-bottom: 14px;
+  color: var(--text-muted);
+}
+
+.points-chart-svg {
+  width: 100%;
+  max-width: 600px;
+  height: auto;
+}
+
+.chart-point {
+  fill: var(--gold);
+  cursor: pointer;
+  transition: r 0.15s, fill 0.15s;
+}
+
+.chart-point:hover {
+  fill: var(--gold-light);
+  r: 6;
+}
+
+.leaderboard-me { font-weight: 700; color: var(--gold); }
+
+.analytics-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.analytics-row > .dev-section {
+  flex: 1;
+  min-width: 280px;
+}
+
 /* ── Two-column item/set picker (All vs Selected) ── */
 .picker-columns {
   display: flex;
@@ -435,7 +586,144 @@ main {
   padding: 2px 6px;
 }
 
-.selected-remove:hover { color: #e07070; }
+.selected-remove:hover { color: var(--unclaim-text); }
+
+/* ── Equipment-slot doll (item-set builder + item/set viewer modal) ──
+   Compact by design: the doll is just clickable icon-sized cells, each
+   showing its own real OSRS equipment-slot tile art (assets/doll-slots/) as
+   a background — no inline lists/search per cell (that was the "way too
+   big" version). Clicking a cell shows that slot's current items + search
+   in the panel beside it instead. "Other" (non-equipable items) has no
+   slot tile of its own (it isn't a real equipment slot) so it's a separate
+   button below the doll, but behaves identically (click to select, same
+   detail panel). */
+.doll-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.equipment-doll {
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  grid-template-rows: repeat(5, 56px);
+  grid-template-areas:
+    ".      head   ."
+    "cape   neck   ammo"
+    "weapon body   shield"
+    ".      legs   ."
+    "hands  feet   ring";
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.doll-slot {
+  position: relative;
+  background-size: 100% 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.doll-slot:hover { filter: brightness(1.25); }
+.doll-slot.active { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.doll-slot[data-slot="head"]   { grid-area: head;   background-image: url("assets/doll-slots/head.webp"); }
+.doll-slot[data-slot="cape"]   { grid-area: cape;   background-image: url("assets/doll-slots/cape.webp"); }
+.doll-slot[data-slot="neck"]   { grid-area: neck;   background-image: url("assets/doll-slots/neck.png"); }
+.doll-slot[data-slot="ammo"]   { grid-area: ammo;   background-image: url("assets/doll-slots/ammo.webp"); }
+.doll-slot[data-slot="weapon"] { grid-area: weapon; background-image: url("assets/doll-slots/weapon.webp"); }
+.doll-slot[data-slot="body"]   { grid-area: body;   background-image: url("assets/doll-slots/body.webp"); }
+.doll-slot[data-slot="shield"] { grid-area: shield; background-image: url("assets/doll-slots/shield.webp"); }
+.doll-slot[data-slot="legs"]   { grid-area: legs;   background-image: url("assets/doll-slots/legs.webp"); }
+.doll-slot[data-slot="hands"]  { grid-area: hands;  background-image: url("assets/doll-slots/hands.webp"); }
+.doll-slot[data-slot="feet"]   { grid-area: feet;   background-image: url("assets/doll-slots/feet.webp"); }
+.doll-slot[data-slot="ring"]   { grid-area: ring;   background-image: url("assets/doll-slots/ring.webp"); }
+
+/* Wins over the per-slot rules above by source order (same specificity):
+   once a slot holds an item, show the generic "occupied" art instead of
+   that slot's empty-equipment icon — the item's own photo (.doll-slot-icon)
+   renders on top of this. Removing the item reverts to the rule above since
+   dollSlotButtonHtml stops adding this class once members.length is 0. */
+.doll-slot.occupied { background-image: url("assets/doll-slots/occupied.png"); }
+
+/* Wins over .occupied above by source order (same specificity, comes
+   later): the Progress-tab item/set modal's doll (renderModalNSets) adds
+   this once every item in that slot is marked collected, so the slot shows
+   green at a glance without having to open its detail panel to see the
+   item chip's own color. Never added by the item-set builder (dev.js/
+   login.js Edit tab) — there's no "collected" concept while just editing
+   a set's membership. */
+.doll-slot.collected { background-image: none; background-color: var(--complete-bg); }
+
+.doll-slot-icon { max-width: 88%; max-height: 88%; object-fit: contain; pointer-events: none; }
+
+.doll-slot-badge {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  background: var(--gold);
+  color: var(--text-on-gold);
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 0 4px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.doll-other-row { margin-top: 10px; }
+
+.doll-other-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.doll-other-btn.active { border-color: var(--gold); color: var(--gold); }
+
+.doll-detail-panel {
+  flex: 1;
+  min-width: 220px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.doll-detail-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 6px;
+}
+
+.doll-slot-members {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.doll-slot-members .selected-chip { font-size: 13px; }
+
+.doll-collapse-toggle { font-size: 12px; padding: 2px 8px; }
+
+.doll-global-search-btn { display: block; margin-top: 10px; }
+.doll-global-search-btn.active { border-color: var(--gold); color: var(--gold); }
 
 /* ── Item bank (Dev dashboard) ── */
 .item-thumb {
@@ -523,7 +811,7 @@ main {
   transition: border-color 0.2s;
 }
 
-.tile-card:hover:not(.complete) { border-color: #4a4d60; }
+.tile-card:hover:not(.complete) { border-color: var(--border-hover); }
 
 .tile-card.complete {
   background: var(--complete-bg);
@@ -558,9 +846,9 @@ main {
   flex-shrink: 0;
 }
 
-.status-badge.done    { background: #1a4a1a; color: var(--complete-text); }
-.status-badge.active  { background: #3d2c08; color: #e8b840; }
-.status-badge.open    { background: #1e2032; color: var(--text-muted); }
+.status-badge.done    { background: var(--status-done-bg); color: var(--complete-text); }
+.status-badge.active  { background: var(--status-active-bg); color: var(--status-active-text); }
+.status-badge.open    { background: var(--status-open-bg); color: var(--text-muted); }
 
 .progress-info {
   font-size: 12px;
@@ -584,8 +872,8 @@ main {
 }
 
 .claimant.me {
-  background: #162616;
-  border-color: #3a6a3a;
+  background: var(--claimant-me-bg);
+  border-color: var(--claimant-me-border);
   color: var(--complete-text);
   font-weight: 600;
 }
@@ -602,11 +890,11 @@ main {
   align-self: flex-start;
 }
 
-.btn-claim { background: var(--gold); color: #0f1117; }
+.btn-claim { background: var(--gold); color: var(--text-on-gold); }
 .btn-claim:hover { background: var(--gold-light); }
 
-.btn-unclaim { background: #3a1f1f; color: #e07070; border: 1px solid #5a2f2f; }
-.btn-unclaim:hover { background: #4a2020; }
+.btn-unclaim { background: var(--unclaim-bg); color: var(--unclaim-text); border: 1px solid var(--unclaim-border); }
+.btn-unclaim:hover { background: var(--unclaim-hover-bg); }
 
 /* ── Responsive ── */
 @media (max-width: 640px) {

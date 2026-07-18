@@ -49,6 +49,21 @@ export async function updateEventEndTime(supabase, eventId, endTimeUtc) {
   if (error) throw error;
 }
 
+export async function updateEventStartTime(supabase, eventId, startTimeUtc) {
+  const { error } = await supabase.from("events").update({ start_time_utc: startTimeUtc }).eq("id", eventId);
+  if (error) throw error;
+}
+
+// Wraps the now-guarded clan_totals() RPC (see rls.sql) — ranks clans by
+// points descending so the UI doesn't have to re-sort.
+export async function getClanLeaderboard(supabase, eventId) {
+  const { data, error } = await supabase.rpc("clan_totals", { p_event_id: eventId });
+  if (error) throw error;
+  return data
+    .map((c) => ({ clanId: c.clan_id, displayName: c.display_name, totalPoints: c.total_points }))
+    .sort((a, b) => b.totalPoints - a.totalPoints);
+}
+
 export async function createClan(supabase, { displayName, prefix }) {
   const { data, error } = await supabase
     .rpc("create_clan", { p_display_name: displayName, p_prefix: prefix })
@@ -223,10 +238,73 @@ export async function listItemsInSet(supabase, itemSetId) {
   return data.map((row) => row.items);
 }
 
+export async function listItemsByIds(supabase, itemIds) {
+  if (itemIds.length === 0) return [];
+  const { data, error } = await supabase.from("items").select().in("id", itemIds);
+  if (error) throw error;
+  return data;
+}
+
+export async function searchLocalItems(supabase, query) {
+  const { data, error } = await supabase.from("items").select().ilike("name", `%${query}%`).limit(20);
+  if (error) throw error;
+  return data;
+}
+
+// Resolves a wiki search pick to a stable local items.id, caching it on
+// first use (keyed on wiki_page_name — see items_wiki_page_name_key in
+// schema.sql). Needs no admin UPDATE privilege on items (see items_insert
+// in rls.sql): find-by-wiki_page_name -> insert if missing -> on a unique
+// violation (23505, two admins caching the same item at once), re-select
+// and return whichever insert actually won.
+export async function getOrCreateItemFromWiki(supabase, { name, photoUrl, equipmentSlot, wikiPageName }) {
+  const { data: existing, error: findError } = await supabase
+    .from("items")
+    .select()
+    .eq("wiki_page_name", wikiPageName)
+    .maybeSingle();
+  if (findError) throw findError;
+  if (existing) return existing;
+
+  const { data: inserted, error: insertError } = await supabase
+    .from("items")
+    .insert({ name, photo_url: photoUrl, equipment_slot: equipmentSlot, wiki_page_name: wikiPageName })
+    .select()
+    .single();
+  if (!insertError) return inserted;
+  if (insertError.code !== "23505") throw insertError;
+
+  const { data: winner, error: raceError } = await supabase
+    .from("items")
+    .select()
+    .eq("wiki_page_name", wikiPageName)
+    .maybeSingle();
+  if (raceError) throw raceError;
+  return winner;
+}
+
 export async function elevateToDev(supabase, password) {
   const { error } = await supabase.functions.invoke("dev-elevate", { body: { password } });
   if (error) throw error;
 
   const { error: refreshError } = await supabase.auth.refreshSession();
   if (refreshError) throw refreshError;
+}
+
+// `supabase` here must already be signed in as the *new*, tab-scoped
+// session being turned into "clan X's admin" — devAccessToken is a
+// separate proof, the access token of the caller's own already-elevated
+// Dev session, so the edge function can verify a real Dev is behind this
+// without that Dev's own session ever being touched.
+export async function actAsClan(supabase, { clanId, eventId, devAccessToken }) {
+  const { data, error } = await supabase.functions.invoke("act-as-clan", {
+    body: { clanId, eventId },
+    headers: { "X-Dev-Authorization": `Bearer ${devAccessToken}` },
+  });
+  if (error) throw error;
+
+  const { error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError) throw refreshError;
+
+  return data;
 }

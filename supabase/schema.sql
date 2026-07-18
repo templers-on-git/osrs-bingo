@@ -14,9 +14,14 @@ create table if not exists events (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   status text not null default 'draft' check (status in ('draft', 'published', 'finished')),
+  start_time_utc timestamptz,
   end_time_utc timestamptz not null,
   created_at timestamptz not null default now()
 );
+
+-- `create table if not exists` above won't retroactively add this column to
+-- the live project's already-existing events table.
+alter table events add column if not exists start_time_utc timestamptz;
 
 -- event_id is nullable: a clan is created on its own (Dev-only) and then
 -- assigned to exactly one event afterward via assign_clan_to_event(). It's
@@ -65,6 +70,18 @@ create table if not exists items (
   photo_url text
 );
 
+-- `create table if not exists` above won't retroactively add these columns
+-- to the live project's already-existing items table. wiki_page_name is the
+-- stable dedup key for items auto-cached from an OSRS Wiki search pick (see
+-- getOrCreateItemFromWiki in admin.js) — legacy hand-entered items and any
+-- future non-wiki item keep it null, which the partial unique index below
+-- allows (a plain `unique` column would too, but the partial index says so
+-- explicitly and stays safely re-runnable, unlike `add constraint`, which
+-- has no IF NOT EXISTS form).
+alter table items add column if not exists equipment_slot text;
+alter table items add column if not exists wiki_page_name text;
+create unique index if not exists items_wiki_page_name_key on items (wiki_page_name) where wiki_page_name is not null;
+
 create table if not exists item_sets (
   id uuid primary key default gen_random_uuid(),
   name text not null
@@ -99,6 +116,20 @@ create table if not exists tiles (
   -- {"item_ids": [...]} for collect_one_of_each / collect_k_of_y, {"k": 2} added for collect_k_of_y,
   -- {"set_ids": [...], "mode": "one_of_each" | "full_set" | "either"} for n_sets
   config jsonb not null default '{}'
+);
+
+-- Ephemeral, player-attributed "I'm working on this" signal — deliberately
+-- separate from tile_progress (which stays anonymous, no player names, per
+-- ADMIN_SPEC.md's Privacy section). Keyed on ign (not the anonymous auth
+-- user id) so the same player can sign up/drop across different login
+-- sessions, since ign is what's stamped into app_metadata at login and
+-- stays stable across logout/login as long as they type the same name.
+create table if not exists tile_signups (
+  tile_id uuid not null references tiles(id) on delete cascade,
+  clan_id uuid not null references clans(id) on delete cascade,
+  ign text not null,
+  signed_up_at timestamptz not null default now(),
+  primary key (tile_id, clan_id, ign)
 );
 
 create table if not exists tile_progress (

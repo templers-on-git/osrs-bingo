@@ -4,9 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>osrs-bingo — Dev</title>
-  <link rel="stylesheet" href="style.css">
+  <!-- ?v= busts the browser's HTTP cache for this file specifically — bump
+       it whenever style.css or dev.js changes. No build step in this repo
+       to do this automatically (see project CLAUDE.md), so it's manual. -->
+  <link rel="stylesheet" href="style.css?v=1">
+  <script>
+    (function () {
+      var t = localStorage.getItem("bingo-theme");
+      if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
 </head>
 <body>
+
+  <button id="theme-toggle-btn" class="theme-toggle" title="Toggle dark/light theme"></button>
 
   <!-- Dev Login Screen -->
   <div id="name-screen">
@@ -61,17 +73,8 @@
       </section>
 
       <section class="dev-section">
-        <h2>Item Bank</h2>
-        <div class="dev-form">
-          <input id="item-name-input" placeholder="Item name" autocomplete="off">
-          <input id="item-photo-input" placeholder="Photo URL (optional)" autocomplete="off">
-          <button id="create-item-btn">Add Item</button>
-        </div>
-        <ul id="items-list" class="dev-list"></ul>
-      </section>
-
-      <section class="dev-section">
         <h2>Item Sets</h2>
+        <p class="dev-muted">Items are searched live from the OSRS Wiki and cached automatically the first time you add one to a set.</p>
         <div class="dev-form">
           <input id="item-set-name-input" placeholder="Set name" autocomplete="off">
           <button id="create-item-set-btn">Add Set</button>
@@ -81,6 +84,6 @@
     </main>
   </div>
 
-  <script type="module" src="dev.js"></script>
+  <script type="module" src="dev.js?v=1"></script>
 </body>
 </html>

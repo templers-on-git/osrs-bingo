@@ -11,6 +11,7 @@
 -- See reset_item_bank.sql for that, kept as a separate script on purpose.
 
 drop table if exists tile_progress cascade;
+drop table if exists tile_signups cascade;
 drop table if exists finish_early_votes cascade;
 drop table if exists tiles cascade;
 drop table if exists point_brackets cascade;

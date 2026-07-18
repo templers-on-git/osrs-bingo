@@ -6,16 +6,13 @@ import {
   deleteEvent,
   setEventStatus,
   updateEventEndTime,
+  updateEventStartTime,
   createClan,
   assignClanToEvent,
   listClans,
   deleteClan,
   updateClan,
   regenerateClanPassword,
-  createItem,
-  listItems,
-  updateItem,
-  deleteItem,
   createItemSet,
   listItemSets,
   updateItemSet,
@@ -24,6 +21,13 @@ import {
   removeItemFromSet,
   listItemsInSet,
 } from "./admin.js";
+import { loadWikiItemIndex, EQUIPMENT_SLOTS, groupBySlotBucket, slotBucketFor } from "./wikiItems.js";
+import { searchPickableItems, resolvePickedItem } from "./itemPicker.js";
+import { initTheme } from "./theme.js";
+import { showError, installGlobalErrorToasts } from "./errorToast.js";
+
+initTheme(document.getElementById("theme-toggle-btn"));
+installGlobalErrorToasts();
 
 const SUPABASE_URL = "https://swqaheqhglqtolzbtgfe.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_MSHvLGLg1hKI7BdqGtAP-Q_biIwaDUL";
@@ -47,22 +51,32 @@ const createEventBtn = document.getElementById("create-event-btn");
 const unassignedClansList = document.getElementById("unassigned-clans-list");
 const eventsList = document.getElementById("events-list");
 
-const itemNameInput = document.getElementById("item-name-input");
-const itemPhotoInput = document.getElementById("item-photo-input");
-const createItemBtn = document.getElementById("create-item-btn");
-const itemsList = document.getElementById("items-list");
 const itemSetNameInput = document.getElementById("item-set-name-input");
 const createItemSetBtn = document.getElementById("create-item-set-btn");
 const itemSetsList = document.getElementById("item-sets-list");
 
 let events = [];
 let clans = [];
-let items = [];
 let itemSets = [];
 let itemsBySetId = {}; // set id -> array of item rows currently in that set
-let editingItemId = null;
 let editingItemSetId = null;
+let expandedSetIds = new Set(); // opt-in: sets currently showing their doll (default collapsed, name only — that's the whole point)
+let selectedSlotBySetId = {}; // set id -> the doll slot (or "other") currently shown in that set's detail panel, if any
+
+// Lazily loaded on first search-box interaction (a full pull of the OSRS
+// Wiki's item index — see wikiItems.js), then cached for the rest of the
+// Dev session rather than reloaded per set card.
+let wikiIndex = null;
+let wikiIndexLoading = null;
+
+// Last search results per (set id, doll slot), so a click on "Add" can look
+// the picked result back up without round-tripping it through a DOM
+// attribute. Nested by slot since each equipment-doll cell searches/caches
+// independently — shape: { [setId]: { [slot]: results } }.
+let searchResultsBySetId = {};
+let searchDebounceTimer = null;
 const editingEndTimeFor = new Set(); // event ids currently showing the end-time editor
+const editingStartTimeFor = new Set(); // event ids currently showing the start-time editor
 
 function escapeAttr(s) {
   return String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -111,17 +125,11 @@ async function handleLogout() {
 }
 
 async function loadDashboard() {
-  [events, clans, items, itemSets] = await Promise.all([
-    listEvents(supabase),
-    listClans(supabase),
-    listItems(supabase),
-    listItemSets(supabase),
-  ]);
+  [events, clans, itemSets] = await Promise.all([listEvents(supabase), listClans(supabase), listItemSets(supabase)]);
   const memberLists = await Promise.all(itemSets.map((s) => listItemsInSet(supabase, s.id)));
   itemsBySetId = Object.fromEntries(itemSets.map((s, i) => [s.id, memberLists[i]]));
 
   renderDashboard();
-  renderItems();
   renderItemSets();
 }
 
@@ -136,11 +144,15 @@ function toDatetimeLocalValue(isoString) {
 
 // Shared row markup for a clan, used both in the unassigned list and inside
 // each event card — showRemove only makes sense for clans already on an event.
-function clanRowHtml(c, { showRemove }) {
+function clanRowHtml(c, { showRemove, eventId }) {
+  const actAsLink = eventId
+    ? `<a class="btn-ghost" href="login.html?actAsClan=${encodeURIComponent(c.clanId)}&actAsEvent=${encodeURIComponent(eventId)}" target="_blank" rel="noopener">Act as Admin</a>`
+    : "";
   return `
     <li>
       <span>${c.displayName}${c.prefix ? ` (${c.prefix})` : ""}</span>
       <span class="dev-row-actions">
+        ${actAsLink}
         ${showRemove ? `<button class="btn-ghost" data-remove-clan="${c.clanId}">Remove</button>` : ""}
         <button class="btn-ghost" data-rename-clan="${c.clanId}">Rename</button>
         <button class="btn-ghost" data-regen="${c.clanId}" data-role="admin">Regen admin pw</button>
@@ -177,6 +189,15 @@ function renderDashboard() {
           <button class="btn-ghost" data-delete-event="${event.id}">Delete event</button>
         </h3>
         <p class="dev-muted">
+          Starts: ${new Date(event.start_time_utc ?? event.created_at).toLocaleString()}${event.start_time_utc ? "" : " (auto, when the event was created)"}
+          ${editingStartTimeFor.has(event.id) ? `
+            <input type="datetime-local" data-start-input="${event.id}" value="${toDatetimeLocalValue(event.start_time_utc ?? event.created_at)}">
+            <button class="btn-ghost" data-save-start="${event.id}">Save</button>
+          ` : `
+            <button class="btn-ghost" data-edit-start="${event.id}">${event.start_time_utc ? "Change start time" : "Set start time"}</button>
+          `}
+        </p>
+        <p class="dev-muted">
           Ends: ${new Date(event.end_time_utc).toLocaleString()}
           ${editingEndTimeFor.has(event.id) ? `
             <input type="datetime-local" data-end-input="${event.id}" value="${toDatetimeLocalValue(event.end_time_utc)}">
@@ -187,7 +208,7 @@ function renderDashboard() {
         </p>
         <ul class="dev-list">
           ${assigned.length
-            ? assigned.map((c) => clanRowHtml(c, { showRemove: true })).join("")
+            ? assigned.map((c) => clanRowHtml(c, { showRemove: true, eventId: event.id })).join("")
             : "<li class=\"dev-empty\">No clans yet</li>"}
         </ul>
         ${unassigned.length ? `
@@ -199,65 +220,173 @@ function renderDashboard() {
   }).join("");
 }
 
-function itemRowHtml(item) {
-  if (item.id === editingItemId) return itemFormHtml(item);
-
-  return `
-    <li>
-      <span>${item.photo_url ? `<img src="${escapeAttr(item.photo_url)}" alt="" class="item-thumb">` : ""}${escapeAttr(item.name)}</span>
-      <span class="dev-row-actions">
-        <button class="btn-ghost" data-edit-item="${item.id}">Edit</button>
-        <button class="btn-ghost" data-delete-item="${item.id}">Delete</button>
-      </span>
-    </li>`;
+function slotLabel(slot) {
+  return slot === "other" ? "Other (non-equipment)" : slot[0].toUpperCase() + slot.slice(1);
 }
 
-function itemFormHtml(item) {
+function searchResultRowHtml(result, index, setId, slot) {
+  // In global search mode the row isn't already scoped to one slot's
+  // section, so show which slot it'll actually land in.
+  const slotBadge = slot === GLOBAL_SEARCH_SLOT ? ` <em>(${slotLabel(slotBucketFor(result.equipmentSlot))})</em>` : "";
   return `
-    <li>
-      <span class="dev-form">
-        <input class="item-edit-name" value="${escapeAttr(item.name)}" placeholder="Item name">
-        <input class="item-edit-photo" value="${escapeAttr(item.photo_url ?? "")}" placeholder="Photo URL">
-        <button class="btn-ghost" data-save-item="${item.id}">Save</button>
-        <button class="btn-ghost" data-cancel-edit-item="${item.id}">Cancel</button>
-      </span>
-    </li>`;
+    <div class="checkbox-row">
+      ${result.photoUrl ? `<img src="${escapeAttr(result.photoUrl)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
+      <span>${escapeAttr(result.name)}${result.equipmentSlot === "2h" ? " (2h)" : ""}${slotBadge}${result.source === "wiki" ? " <em>(from wiki)</em>" : ""}</span>
+      <button class="btn-ghost" data-pick-result-index="${index}" data-pick-set-id="${escapeAttr(setId)}" data-pick-slot="${slot}">Add</button>
+    </div>`;
 }
 
-function renderItems() {
-  itemsList.innerHTML = items.length ? items.map(itemRowHtml).join("") : "<li class=\"dev-empty\">No items yet</li>";
+// One compact doll cell: just an icon (first item, if any) plus a count
+// badge if the set holds more than one item in that slot — clicking selects
+// the slot, which is what actually shows/searches its members (see
+// dollDetailPanelHtml below). Kept deliberately tiny; this is what replaces
+// the old per-cell inline list+search that made the doll "way too big".
+function dollSlotButtonHtml(setId, slot, members, isSelected) {
+  const first = members[0];
+  return `
+    <button type="button" class="doll-slot ${members.length ? "occupied" : ""} ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${slot}" title="${slotLabel(slot)}">
+      ${first?.photo_url ? `<img src="${escapeAttr(first.photo_url)}" alt="" class="doll-slot-icon" referrerpolicy="no-referrer">` : ""}
+      ${members.length > 1 ? `<span class="doll-slot-badge">${members.length}</span>` : ""}
+    </button>`;
+}
+
+// "Other" isn't a real equipment slot (no doll position for it), but stays
+// part of the same click-to-select interaction as every doll cell.
+function otherRowButtonHtml(setId, members, isSelected) {
+  return `
+    <button type="button" class="doll-other-btn ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="other">
+      ${slotLabel("other")}${members.length ? ` (${members.length})` : ""}
+    </button>`;
+}
+
+// Sentinel "slot" for the global search button (GearScape-style): not a
+// real doll position, just another value of the same selectedSlotBySetId
+// state, so it rides the existing [data-select-slot] click handling for
+// free. Search results aren't filtered to a slot in this mode; picking a
+// result still auto-lands in the right doll cell on the next render since
+// item_set_members carries no slot of its own — slot is always derived
+// from the item's own equipment_slot in groupBySlotBucket, regardless of
+// which UI path (a specific slot's search, or this global one) added it.
+const GLOBAL_SEARCH_SLOT = "__all__";
+
+function globalSearchButtonHtml(setId, isSelected) {
+  return `
+    <button type="button" class="btn-ghost doll-global-search-btn ${isSelected ? "active" : ""}" data-select-slot="${setId}" data-slot="${GLOBAL_SEARCH_SLOT}" title="Search all items — picks land in the right slot automatically">
+      🔍 Search all
+    </button>`;
+}
+
+// The right-hand panel for whichever slot is currently selected on a set's
+// doll: its current members (with remove buttons) plus a search box scoped
+// to that slot. Nothing selected yet -> a plain placeholder, no panel UI.
+// GLOBAL_SEARCH_SLOT is the one exception — no single slot's members to
+// show, just an unfiltered search box (see handleItemSetSearchInput).
+function dollDetailPanelHtml(setId, selectedSlot, grouped) {
+  if (!selectedSlot) {
+    return `<div class="doll-detail-panel"><p class="dev-empty">Click a slot to view or search items.</p></div>`;
+  }
+
+  if (selectedSlot === GLOBAL_SEARCH_SLOT) {
+    return `
+      <div class="doll-detail-panel">
+        <p class="doll-detail-label">Search all items</p>
+        <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${GLOBAL_SEARCH_SLOT}" placeholder="Search any item..." autocomplete="off">
+        <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${GLOBAL_SEARCH_SLOT}"></div>
+      </div>`;
+  }
+
+  const members = grouped[selectedSlot] || [];
+  return `
+    <div class="doll-detail-panel">
+      <p class="doll-detail-label">${slotLabel(selectedSlot)}</p>
+      <div class="doll-slot-members">${memberChipsHtml(members, setId)}</div>
+      <input type="text" class="checkbox-search item-set-add-search" data-set-id="${setId}" data-slot="${selectedSlot}" placeholder="Search ${slotLabel(selectedSlot).toLowerCase()}..." autocomplete="off">
+      <div class="checkbox-list item-set-add-results" data-set-id="${setId}" data-slot="${selectedSlot}"></div>
+    </div>`;
+}
+
+// Extracted so refreshItemSetMembers can update just the members list after
+// an add/remove, without touching the search input/results next to it (see
+// that function's comment for why).
+function memberChipsHtml(members, setId) {
+  return members.length
+    ? members.map((m) => `
+      <div class="selected-chip">
+        ${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb" referrerpolicy="no-referrer">` : ""}
+        <span>${escapeAttr(m.name)}${m.equipment_slot === "2h" ? " (2h)" : ""}</span>
+        <button class="selected-remove" data-remove-member="${m.id}" data-set-id="${setId}">&times;</button>
+      </div>`).join("")
+    : "<p class=\"dev-empty\">Empty</p>";
 }
 
 function itemSetCardHtml(set) {
   if (set.id === editingItemSetId) return itemSetFormHtml(set);
 
+  const isExpanded = expandedSetIds.has(set.id);
   const members = itemsBySetId[set.id] || [];
-  const availableToAdd = items.filter((i) => !members.some((m) => m.id === i.id));
+  const grouped = groupBySlotBucket(members, (m) => m.equipment_slot);
+  const selectedSlot = selectedSlotBySetId[set.id];
 
   return `
-    <div class="dev-event-card">
+    <div class="dev-event-card" data-set-card="${set.id}">
       <h3>
+        <button class="btn-ghost doll-collapse-toggle" data-toggle-expand="${set.id}">${isExpanded ? "▾" : "▸"}</button>
         ${escapeAttr(set.name)}
         <button class="btn-ghost" data-edit-item-set="${set.id}">Rename</button>
         <button class="btn-ghost" data-delete-item-set="${set.id}">Delete</button>
       </h3>
-      <ul class="dev-list">
-        ${members.length
-          ? members.map((m) => `
-            <li>
-              <span>${m.photo_url ? `<img src="${escapeAttr(m.photo_url)}" alt="" class="item-thumb">` : ""}${escapeAttr(m.name)}</span>
-              <button class="btn-ghost" data-remove-member="${m.id}" data-set-id="${set.id}">Remove</button>
-            </li>`).join("")
-          : "<li class=\"dev-empty\">No items yet</li>"}
-      </ul>
-      ${availableToAdd.length ? `
-        <div class="dev-form">
-          <select data-add-member-select="${set.id}">
-            ${availableToAdd.map((i) => `<option value="${i.id}">${escapeAttr(i.name)}</option>`).join("")}
-          </select>
-          <button class="btn-ghost" data-add-member-btn="${set.id}">Add to set</button>
+      ${isExpanded ? `
+        ${globalSearchButtonHtml(set.id, selectedSlot === GLOBAL_SEARCH_SLOT)}
+        <div class="doll-layout">
+          <div class="equipment-doll">
+            ${EQUIPMENT_SLOTS.map((slot) => dollSlotButtonHtml(set.id, slot, grouped[slot], slot === selectedSlot)).join("")}
+          </div>
+          ${dollDetailPanelHtml(set.id, selectedSlot, grouped)}
+        </div>
+        <div class="doll-other-row">
+          ${otherRowButtonHtml(set.id, grouped.other, selectedSlot === "other")}
         </div>` : ""}
     </div>`;
+}
+
+// Rebuilds just one set's card in place (used by expand/collapse) — never
+// call renderItemSets() for this, since a full-list re-render tears down
+// and recreates every OTHER expanded set's <img> elements too, which was
+// the actual cause of the sluggishness/"pictures break" symptom: repeatedly
+// destroying and recreating already-loaded wiki images on every click.
+function rerenderItemSetCard(setId) {
+  const set = itemSets.find((s) => s.id === setId);
+  if (!set) return;
+  const cardEl = itemSetsList.querySelector(`[data-set-card="${setId}"]`);
+  if (cardEl) cardEl.outerHTML = itemSetCardHtml(set);
+}
+
+// After adding/removing a member, only the doll icons/badges and the
+// members list actually need to change — NOT the whole card via
+// rerenderItemSetCard, since that regenerates the search input and results
+// list from scratch too, wiping an in-progress query and its results. That
+// made picking several same-named items in a row (e.g. "rune sword", "rune
+// platebody") require retyping the search after every single pick. Leaving
+// the search input/results DOM untouched here fixes that.
+async function refreshItemSetMembers(setId) {
+  itemsBySetId[setId] = await listItemsInSet(supabase, setId);
+
+  const cardEl = itemSetsList.querySelector(`[data-set-card="${setId}"]`);
+  if (!cardEl) return;
+
+  const grouped = groupBySlotBucket(itemsBySetId[setId], (m) => m.equipment_slot);
+  const selectedSlot = selectedSlotBySetId[setId];
+
+  const dollEl = cardEl.querySelector(".equipment-doll");
+  if (dollEl) dollEl.innerHTML = EQUIPMENT_SLOTS.map((slot) => dollSlotButtonHtml(setId, slot, grouped[slot], slot === selectedSlot)).join("");
+
+  const otherRowEl = cardEl.querySelector(".doll-other-row");
+  if (otherRowEl) otherRowEl.innerHTML = otherRowButtonHtml(setId, grouped.other, selectedSlot === "other");
+
+  const membersEl = cardEl.querySelector(".doll-slot-members");
+  if (membersEl && selectedSlot && selectedSlot !== GLOBAL_SEARCH_SLOT) {
+    membersEl.innerHTML = memberChipsHtml(grouped[selectedSlot] || [], setId);
+  }
 }
 
 function itemSetFormHtml(set) {
@@ -277,62 +406,60 @@ function renderItemSets() {
     : "<p class=\"dev-empty\">No item sets yet.</p>";
 }
 
-async function handleCreateItem() {
-  const name = itemNameInput.value.trim();
-  const photoUrl = itemPhotoInput.value.trim() || null;
-  if (!name) return;
-
-  createItemBtn.disabled = true;
-  try {
-    await createItem(supabase, { name, photoUrl });
-    itemNameInput.value = "";
-    itemPhotoInput.value = "";
-    await loadDashboard();
-  } finally {
-    createItemBtn.disabled = false;
-  }
+async function ensureWikiIndexLoaded() {
+  if (wikiIndex) return wikiIndex;
+  if (!wikiIndexLoading) wikiIndexLoading = loadWikiItemIndex(fetch);
+  wikiIndex = await wikiIndexLoading;
+  return wikiIndex;
 }
 
-async function handleItemsListClick(e) {
-  const deleteItemId = e.target.dataset.deleteItem;
-  if (deleteItemId) {
-    if (confirm("Delete this item? It will be removed from any sets it belongs to.")) {
-      await deleteItem(supabase, deleteItemId);
-      await loadDashboard();
+// Delegated on itemSetsList (not attached per-input, since cards are
+// recreated on every render) — debounced so typing doesn't hit the DB and
+// re-filter the wiki index on every keystroke. Renders straight into this
+// one set's results container rather than going through loadDashboard()/
+// renderItemSets(), so the input keeps focus and other cards' in-progress
+// searches aren't disturbed.
+function handleItemSetSearchInput(e) {
+  if (!e.target.classList.contains("item-set-add-search")) return;
+  const setId = e.target.dataset.setId;
+  const slot = e.target.dataset.slot;
+  const query = e.target.value;
+
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(async () => {
+    const resultsEl = itemSetsList.querySelector(`.item-set-add-results[data-set-id="${setId}"][data-slot="${slot}"]`);
+    if (!resultsEl) return;
+
+    (searchResultsBySetId[setId] ??= {})[slot] = [];
+    if (!query.trim()) {
+      resultsEl.innerHTML = "";
+      return;
     }
-    return;
-  }
 
-  const editItemId = e.target.dataset.editItem;
-  if (editItemId) {
-    editingItemId = editItemId;
-    renderItems();
-    return;
-  }
+    resultsEl.innerHTML = wikiIndex ? "" : "<p class=\"dev-empty\">Loading wiki item index…</p>";
+    await ensureWikiIndexLoaded();
 
-  const cancelItemId = e.target.dataset.cancelEditItem;
-  if (cancelItemId) {
-    editingItemId = null;
-    renderItems();
-    return;
-  }
+    // The debounced query may be stale by the time the (possibly slow,
+    // first-ever) wiki index load resolves — bail if the box moved on.
+    if (itemSetsList.querySelector(`.item-set-add-search[data-set-id="${setId}"][data-slot="${slot}"]`)?.value !== query) return;
 
-  const saveItemId = e.target.dataset.saveItem;
-  if (saveItemId) {
-    const row = e.target.closest("li");
-    const name = row.querySelector(".item-edit-name").value.trim();
-    const photoUrl = row.querySelector(".item-edit-photo").value.trim() || null;
-    if (!name) return;
-
-    await updateItem(supabase, saveItemId, { name, photoUrl });
-    editingItemId = null;
-    await loadDashboard();
-  }
+    // Search across everything, then narrow to just this cell's slot —
+    // reuses the same itemPicker.js orchestration as every other search box.
+    // GLOBAL_SEARCH_SLOT is the one exception: show every result, unfiltered
+    // — whichever one gets picked still lands in its own correct slot on
+    // the next render regardless (see GLOBAL_SEARCH_SLOT's comment).
+    const allResults = await searchPickableItems(supabase, wikiIndex, query);
+    const results = slot === GLOBAL_SEARCH_SLOT ? allResults : allResults.filter((r) => slotBucketFor(r.equipmentSlot) === slot);
+    searchResultsBySetId[setId][slot] = results;
+    resultsEl.innerHTML = results.length
+      ? results.map((r, i) => searchResultRowHtml(r, i, setId, slot)).join("")
+      : "<p class=\"dev-empty\">No matches</p>";
+  }, 250);
 }
 
 async function handleCreateItemSet() {
   const name = itemSetNameInput.value.trim();
-  if (!name) return;
+  if (!name) return showError("Item set needs a name.");
 
   createItemSetBtn.disabled = true;
   try {
@@ -345,6 +472,38 @@ async function handleCreateItemSet() {
 }
 
 async function handleItemSetsListClick(e) {
+  const toggleExpandId = e.target.dataset.toggleExpand;
+  if (toggleExpandId) {
+    if (expandedSetIds.has(toggleExpandId)) expandedSetIds.delete(toggleExpandId);
+    else expandedSetIds.add(toggleExpandId);
+    rerenderItemSetCard(toggleExpandId); // only this card, not renderItemSets() — see its comment
+    return;
+  }
+
+  // .closest() (not e.target.dataset directly) since a click can land on
+  // the icon <img>/badge <span> inside a doll-slot button, not the button
+  // itself. Clicking an already-selected slot again deselects it.
+  //
+  // Deliberately NOT a re-render of any kind (not even rerenderItemSetCard)
+  // — this is pure DOM surgery (toggle .active, swap the detail panel's
+  // innerHTML) so the doll's own <img> elements are never touched just for
+  // browsing between slots, which is the actual frequent interaction.
+  const selectSlotBtn = e.target.closest("[data-select-slot]");
+  if (selectSlotBtn) {
+    const setId = selectSlotBtn.dataset.selectSlot;
+    const slot = selectSlotBtn.dataset.slot;
+    const newSlot = selectedSlotBySetId[setId] === slot ? null : slot;
+    selectedSlotBySetId[setId] = newSlot;
+
+    const card = selectSlotBtn.closest("[data-set-card]");
+    card.querySelectorAll("[data-select-slot].active").forEach((btn) => btn.classList.remove("active"));
+    if (newSlot) card.querySelector(`[data-select-slot="${setId}"][data-slot="${newSlot}"]`)?.classList.add("active");
+
+    const grouped = groupBySlotBucket(itemsBySetId[setId] || [], (m) => m.equipment_slot);
+    card.querySelector(".doll-detail-panel").outerHTML = dollDetailPanelHtml(setId, newSlot, grouped);
+    return;
+  }
+
   const deleteSetId = e.target.dataset.deleteItemSet;
   if (deleteSetId) {
     if (confirm("Delete this item set? Any tiles referencing it will need to be updated separately.")) {
@@ -384,23 +543,31 @@ async function handleItemSetsListClick(e) {
   if (removeMemberItemId) {
     const setId = e.target.dataset.setId;
     await removeItemFromSet(supabase, setId, removeMemberItemId);
-    await loadDashboard();
+    await refreshItemSetMembers(setId);
     return;
   }
 
-  const addMemberSetId = e.target.dataset.addMemberBtn;
-  if (addMemberSetId) {
-    const select = itemSetsList.querySelector(`select[data-add-member-select="${addMemberSetId}"]`);
-    if (select?.value) {
-      await addItemToSet(supabase, addMemberSetId, select.value);
-      await loadDashboard();
-    }
+  const pickSetId = e.target.dataset.pickSetId;
+  if (pickSetId) {
+    const slot = e.target.dataset.pickSlot;
+    const result = (searchResultsBySetId[pickSetId]?.[slot] || [])[Number(e.target.dataset.pickResultIndex)];
+    if (!result) return;
+
+    e.target.disabled = true;
+    const item = await resolvePickedItem(supabase, result);
+    await addItemToSet(supabase, pickSetId, item.id);
+    await refreshItemSetMembers(pickSetId);
+    // Removes just this row rather than re-rendering the whole results list
+    // — the search input/results next to it are left alone (see
+    // refreshItemSetMembers), so picking several same-named items in a row
+    // (e.g. "rune sword", "rune platebody") doesn't require retyping.
+    e.target.closest(".checkbox-row")?.remove();
   }
 }
 
 async function handleCreateClan() {
   const displayName = clanNameInput.value.trim();
-  if (!displayName) return;
+  if (!displayName) return showError("Clan needs a name.");
   const prefix = clanPrefixInput.value.trim() || null;
 
   createClanBtn.disabled = true;
@@ -422,7 +589,7 @@ async function handleCreateClan() {
 async function handleCreateEvent() {
   const name = eventNameInput.value.trim();
   const endLocal = eventEndInput.value;
-  if (!name || !endLocal) return;
+  if (!name || !endLocal) return showError(!name ? "Event needs a name." : "Event needs an end time.");
 
   createEventBtn.disabled = true;
   try {
@@ -507,6 +674,24 @@ eventsList.addEventListener("click", async (e) => {
     return;
   }
 
+  const editStartEventId = e.target.dataset.editStart;
+  if (editStartEventId) {
+    editingStartTimeFor.add(editStartEventId);
+    renderDashboard();
+    return;
+  }
+
+  const saveStartEventId = e.target.dataset.saveStart;
+  if (saveStartEventId) {
+    const input = eventsList.querySelector(`input[data-start-input="${saveStartEventId}"]`);
+    if (input?.value) {
+      await updateEventStartTime(supabase, saveStartEventId, new Date(input.value).toISOString());
+      editingStartTimeFor.delete(saveStartEventId);
+      await loadDashboard();
+    }
+    return;
+  }
+
   const editEndEventId = e.target.dataset.editEnd;
   if (editEndEventId) {
     editingEndTimeFor.add(editEndEventId);
@@ -540,10 +725,9 @@ eventsList.addEventListener("click", async (e) => {
 
 createClanBtn.addEventListener("click", handleCreateClan);
 createEventBtn.addEventListener("click", handleCreateEvent);
-createItemBtn.addEventListener("click", handleCreateItem);
-itemsList.addEventListener("click", handleItemsListClick);
 createItemSetBtn.addEventListener("click", handleCreateItemSet);
 itemSetsList.addEventListener("click", handleItemSetsListClick);
+itemSetsList.addEventListener("input", handleItemSetSearchInput);
 
 async function init() {
   const { data: { session } } = await supabase.auth.getSession();

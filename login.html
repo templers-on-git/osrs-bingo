@@ -4,9 +4,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Templars Bingo Website — Log In</title>
-  <link rel="stylesheet" href="style.css">
+  <!-- ?v= busts the browser's HTTP cache for this file specifically — bump
+       it whenever style.css or login.js changes. No build step in this repo
+       to do this automatically (see project CLAUDE.md), so it's manual. -->
+  <link rel="stylesheet" href="style.css?v=1">
+  <script>
+    (function () {
+      var t = localStorage.getItem("bingo-theme");
+      if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", t);
+    })();
+  </script>
 </head>
 <body>
+
+  <button id="theme-toggle-btn" class="theme-toggle" title="Toggle dark/light theme"></button>
+
+  <div id="acting-as-dev-banner" class="acting-as-banner hidden">
+    🛠️ Acting as <strong id="acting-as-clan-name"></strong> (Dev) — close this tab to exit
+  </div>
 
   <!-- Login Screen -->
   <div id="name-screen">
@@ -25,11 +41,26 @@
   <div id="loggedin-screen" class="hidden">
     <header>
       <h1>⚔️ Templars Bingo Website</h1>
+      <div class="stats-bar">
+        <div class="stat">
+          <span class="stat-label">Points</span>
+          <span class="stat-value" id="stat-points">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Tiles Done</span>
+          <span class="stat-value" id="stat-completed">—</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Progress</span>
+          <span class="stat-value" id="stat-percent">—</span>
+        </div>
+      </div>
       <span class="event-clan-display" id="event-clan-display"></span>
       <div id="admin-tabs" class="header-right hidden">
         <button class="btn-ghost" id="view-tab-btn">View</button>
         <button class="btn-ghost" id="edit-tab-btn">Edit</button>
         <button class="btn-ghost" id="progress-tab-btn">Progress</button>
+        <button class="btn-ghost" id="analytics-tab-btn">Analytics</button>
       </div>
       <div class="header-right">
         <span class="playing-as">Playing as <strong id="ign-display"></strong> (<span id="role-display"></span>)</span>
@@ -39,6 +70,7 @@
     <main>
       <!-- View: same rendering for Players and Admins -->
       <div id="view-pane">
+        <button class="btn-ghost hide-completed-toggle" id="view-hide-completed-toggle">Hide completed tiles</button>
         <div id="board-grid"></div>
       </div>
 
@@ -77,8 +109,8 @@
           </div>
           <div id="tile-items-picker" class="picker-columns hidden">
             <div class="picker-column">
-              <p class="dev-muted">All Items</p>
-              <input type="text" id="tile-items-search" class="checkbox-search" placeholder="Search items...">
+              <p class="dev-muted">Search items to add</p>
+              <input type="text" id="tile-items-search" class="checkbox-search item-wiki-search" placeholder="Search the OSRS Wiki...">
               <div id="tile-items-select" class="checkbox-list"></div>
             </div>
             <div class="picker-column">
@@ -104,12 +136,47 @@
           <h2>Board Tiles</h2>
           <div id="edit-tiles-list"></div>
         </section>
+
+        <section class="dev-section">
+          <h2>Item Sets</h2>
+          <p class="dev-muted">Items are searched live from the OSRS Wiki and cached automatically the first time you add one to a set.</p>
+          <p id="item-sets-locked-note" class="dev-muted hidden">Locked — your event has started; ask the Dev for changes.</p>
+          <div id="item-sets-create-form" class="dev-form">
+            <input id="item-set-name-input" placeholder="Set name" autocomplete="off">
+            <button id="create-item-set-btn">Add Set</button>
+          </div>
+          <div id="item-sets-management-list"></div>
+        </section>
       </div>
 
       <!-- Progress: Admin-only, separate from Edit so marking progress during
            a live event never risks a stray click on a tile-delete button -->
       <div id="progress-pane" class="hidden">
+        <button class="btn-ghost hide-completed-toggle" id="progress-hide-completed-toggle">Hide completed tiles</button>
         <div id="progress-tiles-list"></div>
+      </div>
+
+      <!-- Analytics: Admin-only. Leaderboard is cross-clan (totals only, via
+           the guarded clan_totals() RPC); breakdown and points-over-time are
+           own-clan detail only, per ADMIN_SPEC.md's privacy rule. -->
+      <div id="analytics-pane" class="hidden">
+        <div class="analytics-row">
+          <section class="dev-section">
+            <h2>Leaderboard</h2>
+            <ul id="leaderboard-list" class="dev-list"></ul>
+          </section>
+
+          <section class="dev-section">
+            <h2>Your Clan's Breakdown</h2>
+            <ul id="breakdown-list" class="dev-list"></ul>
+          </section>
+        </div>
+
+        <section class="dev-section">
+          <h2>Your Clan's Points Over Time</h2>
+          <div id="points-chart"></div>
+          <p id="points-chart-info" class="dev-muted">Click a point on the graph to see its exact points and time.</p>
+        </section>
       </div>
     </main>
 
@@ -125,6 +192,6 @@
     </div>
   </div>
 
-  <script type="module" src="login.js"></script>
+  <script type="module" src="login.js?v=1"></script>
 </body>
 </html>

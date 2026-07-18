@@ -1,5 +1,8 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getDatabase, ref, set, remove, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { initTheme } from "./theme.js";
+
+initTheme(document.getElementById("theme-toggle-btn"));
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
