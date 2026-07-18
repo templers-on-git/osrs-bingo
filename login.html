@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Templars Bingo Website — Log In</title>
-  <link rel="stylesheet" href="style.css">
+  <!-- ?v= busts the browser's HTTP cache for this file specifically — bump
+       it whenever style.css or login.js changes. No build step in this repo
+       to do this automatically (see project CLAUDE.md), so it's manual. -->
+  <link rel="stylesheet" href="style.css?v=1">
   <script>
     (function () {
       var t = localStorage.getItem("bingo-theme");
@@ -189,6 +192,6 @@
     </div>
   </div>
 
-  <script type="module" src="login.js"></script>
+  <script type="module" src="login.js?v=1"></script>
 </body>
 </html>

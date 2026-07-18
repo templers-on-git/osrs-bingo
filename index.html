@@ -4,7 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TOA Bingo Tracker</title>
-  <link rel="stylesheet" href="style.css">
+  <!-- ?v= busts the browser's HTTP cache for this file specifically — bump
+       it whenever style.css or app.js changes. No build step in this repo
+       to do this automatically (see project CLAUDE.md), so it's manual. -->
+  <link rel="stylesheet" href="style.css?v=1">
   <script>
     (function () {
       var t = localStorage.getItem("bingo-theme");
@@ -57,6 +60,6 @@
     <main id="tiles-container"></main>
   </div>
 
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=1"></script>
 </body>
 </html>
